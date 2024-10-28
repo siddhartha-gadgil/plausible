@@ -214,7 +214,7 @@ open Shrinkable
 instance List.shrinkable [Shrinkable α] : Shrinkable (List α) where
   shrink := fun L =>
     (L.mapIdx fun i _ => L.eraseIdx i) ++
-    (L.mapIdx fun i a => (shrink a).map fun a' => L.modifyNth (fun _ => a') i).join
+    (L.mapIdx fun i a => (shrink a).map fun a' => L.modify (fun _ => a') i).join
 
 instance String.shrinkable : Shrinkable String where
   shrink s := (shrink s.toList).map String.mk
