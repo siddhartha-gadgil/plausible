@@ -136,3 +136,16 @@ warning: declaration uses 'sorry'
 #guard_msgs in
 example (a b : Sum Nat Nat) : a ≠ a → a = b := by
   plausible (config := {numInst := 100})
+
+-- https://leanprover.zulipchat.com/#narrow/stream/287929-mathlib4/topic/slim_check.20giving.20wrong.20counterexamples.3F/near/420008365
+open Nat in
+/--
+info: Unable to find a counter-example
+---
+warning: declaration uses 'sorry'
+-/
+#guard_msgs in
+theorem testBit_pred :
+    testBit (pred x) i = (decide (0 < x) &&
+      (Bool.xor ((List.range i).all fun j => ! testBit x j) (testBit x i))) := by
+  plausible
