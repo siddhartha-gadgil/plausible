@@ -183,7 +183,7 @@ instance Int.shrinkable : Shrinkable Int where
     let converter n :=
       let int := Int.ofNat n
       [int, -int]
-    Nat.shrink n.natAbs |>.bind converter
+    Nat.shrink n.natAbs |>.flatMap converter
 
 instance Bool.shrinkable : Shrinkable Bool := {}
 instance Char.shrinkable : Shrinkable Char := {}
@@ -214,7 +214,7 @@ open Shrinkable
 instance List.shrinkable [Shrinkable α] : Shrinkable (List α) where
   shrink := fun L =>
     (L.mapIdx fun i _ => L.eraseIdx i) ++
-    (L.mapIdx fun i a => (shrink a).map fun a' => L.modifyNth (fun _ => a') i).join
+    (L.mapIdx fun i a => (shrink a).map fun a' => L.modify (fun _ => a') i).flatten
 
 instance String.shrinkable : Shrinkable String where
   shrink s := (shrink s.toList).map String.mk
@@ -242,7 +242,7 @@ open SampleableExt
 instance Sum.SampleableExt [SampleableExt α] [SampleableExt β] : SampleableExt (Sum α β) where
   proxy := Sum (proxy α) (proxy β)
   sample := do
-    match ← chooseAny Bool with 
+    match ← chooseAny Bool with
     | true => return .inl (← sample)
     | false => return .inr (← sample)
   interp s :=
@@ -324,7 +324,7 @@ instance Char.sampleableDefault : SampleableExt Char :=
 instance Option.sampleableExt [SampleableExt α] : SampleableExt (Option α) where
   proxy := Option (proxy α)
   sample := do
-    match ← chooseAny Bool with 
+    match ← chooseAny Bool with
     | true => return none
     | false => return some (← sample)
   interp o := o.map interp
