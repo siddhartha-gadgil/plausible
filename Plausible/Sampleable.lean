@@ -389,11 +389,6 @@ end NoShrink
 /--
 Print (at most) 10 samples of a given type to stdout for debugging.
 -/
-def printSamples_old {t : Type} [Repr t] (g : Gen t) : IO PUnit := do
-  for i in List.range 10 do
-    IO.println s!"{repr (← g.run i)}"
-
-
 def printSamples {t : Type u} [Repr t] (g : Gen t) : IO PUnit := do
 -- TODO: this should be a global instance
   letI : MonadLift Id IO := ⟨fun f => pure <| Id.run f⟩
