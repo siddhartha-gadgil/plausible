@@ -62,7 +62,6 @@ class BoundedRandom (m) (α : Type u) [LE α] where
   -/
   randomR {g : Type} (lo hi : α) (h : lo ≤ hi) [RandomGen g] : RandGT g m {a // lo ≤ a ∧ a ≤ hi}
 
-
 @[inline]
 protected def RandT.up {α : Type u} {m : Type u → Type w} {m' : Type (max u v) → Type w'}
     {g : Type} [RandomGen g] [Monad m] [Monad m']
@@ -104,16 +103,15 @@ def range {g : Type} [RandomGen g] [Monad m] : RandGT g m (Nat × Nat) := do
   let rng := (← get).down
   return RandomGen.range rng
 
-
 @[inline]
 protected def up {α : Type u} {g : Type} [RandomGen g] (x : RandG g α) :
     RandG g (ULift.{v} α) := do
-  RandT.up (m' := Id) (fun x => pure ⟨Id.run x⟩) x
+  RandT.up (fun x => pure ⟨Id.run x⟩) x
 
 @[inline]
-protected def down {α : Type u} {g : Type} [RandomGen g] (x : RandG g (ULift.{v} α) ) :
+protected def down {α : Type u} {g : Type} [RandomGen g] (x : RandG g (ULift.{v} α)) :
     RandG g α :=
-  RandT.down (m' := Id) (fun x => pure (Id.run x).down) x
+  RandT.down (fun x => pure (Id.run x).down) x
 
 end Rand
 
