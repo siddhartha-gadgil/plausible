@@ -38,18 +38,12 @@ namespace Gen
 @[inline]
 def up (x : Gen.{u} α) : Gen (ULift.{v} α) := do
   let size ← read
-  let gen ← get
-  let ⟨val, gen⟩ := x.run ⟨size.down⟩ |>.run ⟨gen.down⟩
-  set <| ULift.up gen.down
-  return ⟨val⟩
+  Rand.up <| x.run ⟨size.down⟩
 
 @[inline]
 def down (x : Gen (ULift.{v} α)) : Gen α := do
   let size ← read
-  let gen ← get
-  let ⟨val, gen⟩ := x.run ⟨size.down⟩ |>.run ⟨gen.down⟩
-  set <| ULift.up gen.down
-  return val.down
+  Rand.down <| x.run ⟨size.down⟩
 
 /-- Lift `Random.random` to the `Gen` monad. -/
 def chooseAny (α : Type u) [Random Id α] : Gen α :=
