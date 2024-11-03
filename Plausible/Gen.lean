@@ -36,12 +36,20 @@ abbrev Gen (α : Type u) := ReaderT (ULift Nat) Rand α
 namespace Gen
 
 @[inline]
-def up (x : Gen.{u} α) : Gen.{max u v} (ULift α) := do
+def up (x : Gen.{u} α) : Gen (ULift.{v} α) := do
   let size ← read
   let gen ← get
   let ⟨val, gen⟩ := x.run ⟨size.down⟩ |>.run ⟨gen.down⟩
   set <| ULift.up gen.down
   return ⟨val⟩
+
+@[inline]
+def down (x : Gen (ULift.{v} α)) : Gen α := do
+  let size ← read
+  let gen ← get
+  let ⟨val, gen⟩ := x.run ⟨size.down⟩ |>.run ⟨gen.down⟩
+  set <| ULift.up gen.down
+  return val.down
 
 /-- Lift `Random.random` to the `Gen` monad. -/
 def chooseAny (α : Type u) [Random Id α] : Gen α :=

@@ -62,6 +62,28 @@ class BoundedRandom (m) (α : Type u) [LE α] where
   -/
   randomR {g : Type} (lo hi : α) (h : lo ≤ hi) [RandomGen g] : RandGT g m {a // lo ≤ a ∧ a ≤ hi}
 
+
+@[inline]
+protected def RandT.up {α : Type u} {m : Type u → Type w} {m' : Type (max u v) → Type w'}
+    {g : Type} [RandomGen g] [Monad m] [Monad m']
+    (m_up : ∀ {α}, m α → m' (ULift α)) (x : RandGT g m α) :
+    RandGT g m' (ULift.{v} α) := do
+  let ⟨val, gen⟩ ←  m_up <| x.run ⟨(← get).down⟩
+  set <| ULift.up gen.down
+  return ⟨val⟩
+
+@[inline]
+protected def RandT.down {α : Type u} {m : Type (max u v) → Type w} {m' : Type u → Type w'}
+    {g : Type} [RandomGen g] [Monad m] [Monad m']
+    (m_down : ∀ {α}, m (ULift α) → m' α) (x : RandGT g m (ULift.{v} α) ) :
+    RandGT g m' α := do
+  let gen := (← get).down
+  let ⟨val, gen⟩ ← m_down do
+    let ⟨⟨val⟩, ⟨gen⟩⟩ ← x.run ⟨gen⟩
+    pure <| .up (val, gen)
+  set <| ULift.up gen
+  return val
+
 namespace Rand
 /-- Generate one more `Nat` -/
 def next [RandomGen g] [Monad m] : RandGT g m Nat := do
@@ -81,6 +103,18 @@ def split {g : Type} [RandomGen g] [Monad m] : RandGT g m g := do
 def range {g : Type} [RandomGen g] [Monad m] : RandGT g m (Nat × Nat) := do
   let rng := (← get).down
   return RandomGen.range rng
+
+
+@[inline]
+protected def up {α : Type u} {g : Type} [RandomGen g] (x : RandG g α) :
+    RandG g (ULift.{v} α) := do
+  RandT.up (m' := Id) (fun x => pure ⟨Id.run x⟩) x
+
+@[inline]
+protected def down {α : Type u} {g : Type} [RandomGen g] (x : RandG g (ULift.{v} α) ) :
+    RandG g α :=
+  RandT.down (m' := Id) (fun x => pure (Id.run x).down) x
+
 end Rand
 
 namespace Random

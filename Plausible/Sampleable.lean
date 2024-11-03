@@ -216,6 +216,9 @@ instance List.shrinkable [Shrinkable α] : Shrinkable (List α) where
     (L.mapIdx fun i _ => L.eraseIdx i) ++
     (L.mapIdx fun i a => (shrink a).map fun a' => L.modify (fun _ => a') i).join
 
+instance ULift.shrinkable [Shrinkable α] : Shrinkable (ULift α) where
+  shrink u := (shrink u.down).map ULift.up
+
 instance String.shrinkable : Shrinkable String where
   shrink s := (shrink s.toList).map String.mk
 
@@ -242,7 +245,7 @@ open SampleableExt
 instance Sum.SampleableExt [SampleableExt α] [SampleableExt β] : SampleableExt (Sum α β) where
   proxy := Sum (proxy α) (proxy β)
   sample := do
-    match ← chooseAny Bool with 
+    match ← chooseAny Bool with
     | true => return .inl (← sample)
     | false => return .inr (← sample)
   interp s :=
@@ -324,7 +327,7 @@ instance Char.sampleableDefault : SampleableExt Char :=
 instance Option.sampleableExt [SampleableExt α] : SampleableExt (Option α) where
   proxy := Option (proxy α)
   sample := do
-    match ← chooseAny Bool with 
+    match ← chooseAny Bool with
     | true => return none
     | false => return some (← sample)
   interp o := o.map interp
@@ -348,6 +351,11 @@ instance List.sampleableExt [SampleableExt α] : SampleableExt (List α) where
   proxy := List (proxy α)
   sample := Gen.listOf sample
   interp := List.map interp
+
+instance ULift.sampleableExt [SampleableExt α] : SampleableExt (ULift α) where
+  proxy := proxy α
+  sample := sample
+  interp a := ⟨interp a⟩
 
 instance String.sampleableExt : SampleableExt String :=
   mkSelfContained do return String.mk (← Gen.listOf (Char.sampleableDefault.sample))
@@ -381,9 +389,23 @@ end NoShrink
 /--
 Print (at most) 10 samples of a given type to stdout for debugging.
 -/
-def printSamples {t : Type} [Repr t] (g : Gen t) : IO PUnit := do
+def printSamples_old {t : Type} [Repr t] (g : Gen t) : IO PUnit := do
   for i in List.range 10 do
     IO.println s!"{repr (← g.run i)}"
+
+
+def printSamples {t : Type u} [Repr t] (g : Gen t) : IO PUnit := do
+-- TODO: this should be a global instance
+  letI : MonadLift Id IO := ⟨fun f => pure <| Id.run f⟩
+  do
+    -- we can't convert directly from `Rand (List t)` to `RandT IO (List Std.Format)`
+    -- (and `RandT IO (List t)` isn't type-correct without
+    -- https://github.com/leanprover/lean4/issues/3011), so go via an intermediate
+    let xs : List Std.Format ← Plausible.runRand <| Rand.down <| do
+      let xs : List t ← (List.range 10).mapM (ReaderT.run g ∘ ULift.up)
+      pure <| ULift.up (xs.map repr)
+    for x in xs do
+      IO.println s!"{x}"
 
 open Lean Meta Elab
 
@@ -449,9 +471,8 @@ values of type `type` using an increasing size parameter.
 elab "#sample " e:term : command =>
   Command.runTermElabM fun _ => do
     let e ← Elab.Term.elabTermAndSynthesize e none
-    let g ← mkGenerator e
-    let ⟨0, α, repr, gen⟩ := g | throwError "Cannot sample from {g.1} due to its universe"
-    let printSamples := mkApp3 (mkConst ``printSamples) α repr gen
+    let ⟨u, α, repr, gen⟩ ← mkGenerator e
+    let printSamples := mkApp3 (mkConst ``printSamples [u]) α repr gen
     let code ← unsafe evalExpr (IO PUnit) (mkApp (mkConst ``IO) (mkConst ``PUnit [1])) printSamples
     _ ← code
 
