@@ -62,6 +62,7 @@ class BoundedRandom (m) (α : Type u) [LE α] where
   -/
   randomR {g : Type} (lo hi : α) (h : lo ≤ hi) [RandomGen g] : RandGT g m {a // lo ≤ a ∧ a ≤ hi}
 
+/-- Given a random generator for `α`, we can convert it to a random generator for `ULift α`. -/
 @[inline]
 protected def RandT.up {α : Type u} {m : Type u → Type w} {m' : Type (max u v) → Type w'}
     {g : Type} [RandomGen g] [Monad m] [Monad m']
@@ -71,6 +72,7 @@ protected def RandT.up {α : Type u} {m : Type u → Type w} {m' : Type (max u v
   set <| ULift.up gen.down
   return ⟨val⟩
 
+/-- Given a random generator for `ULift α`, we can convert it to a random generator for `α`. -/
 @[inline]
 protected def RandT.down {α : Type u} {m : Type (max u v) → Type w} {m' : Type u → Type w'}
     {g : Type} [RandomGen g] [Monad m] [Monad m']
@@ -103,11 +105,13 @@ def range {g : Type} [RandomGen g] [Monad m] : RandGT g m (Nat × Nat) := do
   let rng := (← get).down
   return RandomGen.range rng
 
+/-- Given a random generator for `α`, we can convert it to a random generator for `ULift α`. -/
 @[inline]
 protected def up {α : Type u} {g : Type} [RandomGen g] (x : RandG g α) :
     RandG g (ULift.{v} α) := do
   RandT.up (fun x => pure ⟨Id.run x⟩) x
 
+/-- Given a random generator for `ULift α`, we can convert it to a random generator for `α`. -/
 @[inline]
 protected def down {α : Type u} {g : Type} [RandomGen g] (x : RandG g (ULift.{v} α)) :
     RandG g α :=
