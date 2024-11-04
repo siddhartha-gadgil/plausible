@@ -156,7 +156,7 @@ error:
 Found a counter-example!
 f := 1
 issue: ULift.up 1 = ULift.up 0 does not hold
-(0 shrinks)
+(1 shrinks)
 -------------------
 -/
 #guard_msgs in
