@@ -7,6 +7,16 @@ If you are using built in types Plausible is usually able to handle them already
 import Plausible
 
 example (xs ys : Array Nat) : xs.size = ys.size → xs = ys := by
+  /--
+  ===================
+  Found a counter-example!
+  xs := #[0]
+  ys := #[1]
+  guard: 1 = 1
+  issue: #[0] = #[1] does not hold
+  (0 shrinks)
+  -------------------
+  -/
   plausible
 
 #eval Plausible.Testable.check <| ∀ (xs ys : Array Nat), xs.size = ys.size → xs = ys
@@ -36,6 +46,7 @@ instance : SampleableExt MyType :=
     let xyDiff ← SampleableExt.interpSample Nat
     return ⟨x, x + xyDiff, by omega⟩
 
+-- No counter example found
 #eval Testable.check <| ∀ a b : MyType, a.y ≤ b.x → a.x ≤ b.y
 ```
 For more documentation refer to the module docs.
