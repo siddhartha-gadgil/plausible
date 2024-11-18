@@ -179,6 +179,16 @@ def equality? (e: Expr): MetaM (Option (Expr × Expr × Expr)) := do
     return none
 end Matching
 
+open Lean Meta
+abbrev MRand := RandT MetaM
+
+instance : MonadLift Rand MRand where
+  monadLift := fun x s => return x.run s
+
+abbrev MGen (α : Type) := ReaderT (ULift Nat) MRand α
+
+instance : MonadLift Gen MGen where
+  monadLift := fun x n => x.run n.down
 
 /-- Result of trying to disprove `p` -/
 inductive MetaTestResult (p : Prop) where
