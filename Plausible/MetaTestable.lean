@@ -190,6 +190,8 @@ abbrev MGen (α : Type) := ReaderT (ULift Nat) MRand α
 instance : MonadLift Gen MGen where
   monadLift := fun x n => x.run n.down
 
+#synth MonadLift MetaM MRand
+
 /-- Result of trying to disprove `p` -/
 inductive MetaTestResult (p : Prop) where
   /--
@@ -221,7 +223,7 @@ inductive MetaTestResult (p : Prop) where
 
 /-- `MetaTestable p` uses random examples to try to disprove `p`. -/
 class MetaTestable (p : Prop) where
-  run (cfg : Configuration) (minimize : Bool) (propExpr : Expr) :  Gen (MetaTestResult p)
+  run (cfg : Configuration) (minimize : Bool) (propExpr : Expr) :  MGen (MetaTestResult p)
 
 
 namespace MetaTestResult
@@ -241,32 +243,55 @@ def combine {p q : Prop} : Unit ⊕' (p → q) → Unit ⊕' p → Unit ⊕' q
   | _, _ => PSum.inl ()
 
 /-- Combine the test result for properties `p` and `q` to create a test for their conjunction. -/
-def and : MetaTestResult p → MetaTestResult q → MetaTestResult (p ∧ q)
-  | failure h pf xs n, _ =>
-    failure (fun h2 => h h2.left) pf xs n
-  | _, failure h pf xs n => failure (fun h2 => h h2.right) pf  xs n
-  | success h1, success h2 => success <| combine (combine (PSum.inr And.intro) h1) h2
-  | gaveUp n, gaveUp m => gaveUp <| n + m
-  | gaveUp n, _ => gaveUp n
-  | _, gaveUp n => gaveUp n
-  | mismatch s, _ => mismatch s
-  | _, mismatch s => mismatch s
+def and : MetaTestResult p → MetaTestResult q → Expr →  MetaM (MetaTestResult (p ∧ q))
+  | failure h pf xs n, _, e => do
+    match ← andProp? e with
+    | (some e₁, some e₂) =>
+      let pf' ← withLocalDeclD `h e fun h => do
+        let x ← mkAppOptM ``And.left #[e₁, e₂, h]
+        let e' ← mkAppM' pf #[x]
+        mkLambdaFVars #[h] e'
+      return failure (fun h2 => h h2.left) pf' xs n
+    | (_, _) => throwError "Expected an `And` proposition"
+  | _, failure h pf xs n, e => do
+    match ← andProp? e with
+    | (some e₁, some e₂) =>
+      let pf' ← withLocalDeclD `h e fun h => do
+        let x ← mkAppOptM ``And.right #[e₁, e₂, h]
+        let e' ← mkAppM' pf #[x]
+        mkLambdaFVars #[h] e'
+      return failure (fun h2 => h h2.right) pf' xs n
+    | (_, _) => throwError "Expected an `And` proposition"
+
+  | success h1, success h2, _ => return success <| combine (combine (PSum.inr And.intro) h1) h2
+  | gaveUp n, gaveUp m, _ => return gaveUp <| n + m
+  | gaveUp n, _, _ => return gaveUp n
+  | _, gaveUp n, _ => return gaveUp n
+  | mismatch s, _, _ => return mismatch s
+  | _, mismatch s, _ => return mismatch s
+
 
 /-- Combine the test result for properties `p` and `q` to create a test for their disjunction. -/
-def or : MetaTestResult p → MetaTestResult q → MetaTestResult (p ∨ q)
-  | failure h1 pf1 xs n, failure h2 pf2 ys m =>
-    let h3 := fun h =>
-      match h with
-      | Or.inl h3 => h1 h3
-      | Or.inr h3 => h2 h3
-    failure h3 pf1 (xs ++ ys) (n + m)
-  | success h, _ => success <| combine (PSum.inr Or.inl) h
-  | _, success h => success <| combine (PSum.inr Or.inr) h
-  | gaveUp n, gaveUp m => gaveUp <| n + m
-  | gaveUp n, _ => gaveUp n
-  | _, gaveUp n => gaveUp n
-  | mismatch s, _ => mismatch s
-  | _, mismatch s => mismatch s
+def or : MetaTestResult p → MetaTestResult q → Expr →  MetaM (MetaTestResult (p ∨ q))
+  | failure h1 pf1 xs n, failure h2 pf2 ys m, e => do
+    match ← orProp? e with
+    | (some α, some β) =>
+      let motive ← withLocalDeclD `h e fun h => do
+        mkLambdaFVars #[h] <| mkConst ``False
+      let pf ← mkAppOptM ``Or.rec #[α, β, motive, pf1, pf2]
+      let h3 := fun h =>
+        match h with
+        | Or.inl h3 => h1 h3
+        | Or.inr h3 => h2 h3
+      return failure h3 pf (xs ++ ys) (n + m)
+    | (_, _) => throwError "Expected an `Or` proposition"
+  | success h, _, _ => return success <|  combine (PSum.inr Or.inl) h
+  | _, success h, _ => return success <|  combine (PSum.inr Or.inr) h
+  | gaveUp n, gaveUp m, _ => return gaveUp <| n + m
+  | gaveUp n, _, _ => return gaveUp n
+  | _, gaveUp n, _ => return gaveUp n
+  | mismatch s, _, _ => return mismatch s
+  | _, mismatch s, _ => return mismatch s
 
 /-- If `q → p`, then `¬ p → ¬ q` which means that testing `p` can allow us
 to find counter-examples to `q`. -/
@@ -279,7 +304,7 @@ def imp (h : q → p) (r : MetaTestResult p)
   | mismatch s => mismatch s
 
 /-- Test `q` by testing `p` and proving the equivalence between the two. -/
-def iff (h : q ↔ p) (r : MetaTestResult p) : MetaTestResult q :=
+def iff (h : q ↔ p)  (r : MetaTestResult p) : MetaTestResult q :=
   imp h.mp r (PSum.inr h.mpr)
 
 /-- When we assign a value to a universally quantified variable,
@@ -308,7 +333,7 @@ namespace MetaTestable
 
 open MetaTestResult
 
-def runProp (p : Prop) [MetaTestable p] : Configuration → Bool → Expr → Gen (MetaTestResult p) := MetaTestable.run
+def runProp (p : Prop) [MetaTestable p] : Configuration → Bool → Expr → MGen (MetaTestResult p) := MetaTestable.run
 
 /-- A `dbgTrace` with special formatting -/
 def slimTrace {m : Type → Type _} [Pure m] (s : String) : m PUnit :=
@@ -316,13 +341,9 @@ def slimTrace {m : Type → Type _} [Pure m] (s : String) : m PUnit :=
 
 instance andTestable [MetaTestable p] [MetaTestable q] : MetaTestable (p ∧ q) where
   run := fun cfg min e => do
-  -- let pair ← andProp? e
-  -- match ← andProp? e with
-  -- | (some e₁, some e₂) => do
     let xp ← runProp p cfg min e
     let xq ← runProp q cfg min e
-    return and xp xq
-  -- | _ => return sorry
+    and xp xq e
 
 instance orTestable [MetaTestable p] [MetaTestable q] : MetaTestable (p ∨ q) where
   run := fun cfg min e => do
@@ -334,7 +355,7 @@ instance orTestable [MetaTestable p] [MetaTestable q] : MetaTestable (p ∨ q) w
     | success (PSum.inr h) => return success (PSum.inr <| Or.inl h)
     | _ =>
       let xq ← runProp q cfg min e
-      return or xp xq
+      or xp xq e
 
 instance iffTestable [MetaTestable ((p ∧ q) ∨ (¬ p ∧ ¬ q))] : MetaTestable (p ↔ q) where
   run := fun cfg min e => do
@@ -409,9 +430,9 @@ candidate that falsifies a property and recursively shrinking that one.
 The process is guaranteed to terminate because `shrink x` produces
 a proof that all the values it produces are smaller (according to `SizeOf`)
 than `x`. -/
-partial def minimizeAux [SampleableExt α] {β : α → Prop} [∀ x, MetaTestable (β x)] (cfg : Configuration)
+partial def minimizeAux [SampleableExt α] [ToExpr (SampleableExt.proxy α)] {β : α → Prop} [∀ x, MetaTestable (β x)] (cfg : Configuration)
     (var : String) (x : SampleableExt.proxy α) (n : Nat) :
-    OptionT Gen (Σ x, MetaTestResult (β (SampleableExt.interp x))) := do
+    OptionT MGen (Σ x, MetaTestResult (β (SampleableExt.interp x))) := do
   let candidates := SampleableExt.shrink.shrink x
   if cfg.traceShrinkCandidates then
     slimTrace s!"Candidates for {var} := {repr x}:\n  {repr candidates}"
@@ -431,9 +452,9 @@ partial def minimizeAux [SampleableExt α] {β : α → Prop} [∀ x, MetaTestab
 
 /-- Once a property fails to hold on an example, look for smaller counter-examples
 to show the user. -/
-def minimize [SampleableExt α] {β : α → Prop} [∀ x, MetaTestable (β x)] (cfg : Configuration)
+def minimize [SampleableExt α] [ToExpr (SampleableExt.proxy α)] {β : α → Prop} [∀ x, MetaTestable (β x)] (cfg : Configuration)
     (var : String) (x : SampleableExt.proxy α) (r : MetaTestResult (β <| SampleableExt.interp x)) :
-    Gen (Σ x, MetaTestResult (β <| SampleableExt.interp x)) := do
+    MGen (Σ x, MetaTestResult (β <| SampleableExt.interp x)) := do
   if cfg.traceShrink then
      slimTrace "Shrink"
      slimTrace s!"Attempting to shrink {var} := {repr x}"
@@ -442,7 +463,7 @@ def minimize [SampleableExt α] {β : α → Prop} [∀ x, MetaTestable (β x)] 
 
 /-- Test a universal property by creating a sample of the right type and instantiating the
 bound variable with it. -/
-instance varTestable [SampleableExt α] {β : α → Prop} [∀ x, MetaTestable (β x)] :
+instance varTestable [SampleableExt α] [ToExpr (SampleableExt.proxy α)] {β : α → Prop} [∀ x, MetaTestable (β x)] :
     MetaTestable (NamedBinder var <| ∀ x : α, β x) where
   run := fun cfg min e => do
     let x ← SampleableExt.sample
@@ -465,8 +486,8 @@ instance varTestable [SampleableExt α] {β : α → Prop} [∀ x, MetaTestable 
 instance propVarTestable {β : Prop → Prop} [∀ b : Bool, MetaTestable (β b)] :
   MetaTestable (NamedBinder var <| ∀ p : Prop, β p)
 where
-  run := fun cfg min e =>
-    imp (fun h (b : Bool) => h b) <$> MetaTestable.runProp (NamedBinder var <| ∀ b : Bool, β b) cfg min e
+  run := fun cfg min e => sorry -- Need to interpolate `Prop` and `Bool`
+    -- imp (fun h (b : Bool) => h b) <$> MetaTestable.runProp (NamedBinder var <| ∀ b : Bool, β b) cfg min e
 
 instance (priority := high) unusedVarTestable {β : Prop} [Nonempty α] [MetaTestable β] :
   MetaTestable (NamedBinder var (α → β))
@@ -481,17 +502,17 @@ where
 instance (priority := 2000) subtypeVarTestable {p : α → Prop} {β : α → Prop}
     [∀ x, PrintableProp (p x)]
     [∀ x, MetaTestable (β x)]
-    [SampleableExt (Subtype p)] {var'} :
+    [SampleableExt (Subtype p)] [ToExpr (SampleableExt.proxy (Subtype p))] {var'} :
     MetaTestable (NamedBinder var <| (x : α) → NamedBinder var' <| p x → β x) where
-  run cfg min e :=
-    letI (x : Subtype p) : MetaTestable (β x) :=
-      { run := fun cfg min e => do
-          let r ← MetaTestable.runProp (β x.val) cfg min e
-          return addInfo s!"guard: {printProp (p x)} (by construction)" id r (PSum.inr id) }
-    do
-      let r ← @MetaTestable.run (∀ x : Subtype p, β x.val) (@varTestable var _ _ _ _) cfg min e
-      have := by simp [Subtype.forall, NamedBinder]
-      return iff this r
+  run cfg min e := sorry
+    -- letI (x : Subtype p) : MetaTestable (β x) :=
+    --   { run := fun cfg min e => do
+    --       let r ← MetaTestable.runProp (β x.val) cfg min e
+    --       return addInfo s!"guard: {printProp (p x)} (by construction)" id r (PSum.inr id) }
+    -- do
+    --   let r ← @MetaTestable.run (∀ x : Subtype p, β x.val) (@varTestable var _ _ _ _) cfg min e
+    --   have := by simp [Subtype.forall, NamedBinder]
+    --   return iff this r
 
 instance (priority := low) decidableTestable {p : Prop} [PrintableProp p] [Decidable p] :
     MetaTestable p where
@@ -512,7 +533,7 @@ open MetaTestResult
 
 namespace MetaTestable
 /-- Execute `cmd` and repeat every time the result is `gaveUp` (at most `n` times). -/
-def retry (cmd : Rand (MetaTestResult p)) : Nat → Rand (MetaTestResult p)
+def retry (cmd : MRand (MetaTestResult p)) : Nat → MRand (MetaTestResult p)
   | 0 => return MetaTestResult.gaveUp 1
   | n+1 => do
     let r ← cmd
@@ -533,38 +554,37 @@ def giveUp (x : Nat) : MetaTestResult p → MetaTestResult p
 end MetaTestable
 
 /-- Try `n` times to find a counter-example for `p`. -/
-def MetaTestable.runSuiteAux (p : Prop) [MetaTestable p] (cfg : Configuration) :
-    MetaTestResult p → Nat → Rand (MetaTestResult p)
+def MetaTestable.runSuiteAux (p : Prop) [MetaTestable p] (propExpr: Expr) (cfg : Configuration) :
+    MetaTestResult p → Nat → MRand (MetaTestResult p)
   | r, 0 => return r
   | r, n+1 => do
     let size := (cfg.numInst - n - 1) * cfg.maxSize / cfg.numInst
     if cfg.traceSuccesses then
       slimTrace s!"New sample"
       slimTrace s!"Retrying up to {cfg.numRetries} times until guards hold"
-    let x ← retry (ReaderT.run (MetaTestable.runProp p cfg true sorry) ⟨size⟩) cfg.numRetries
+    let x ← retry (ReaderT.run (MetaTestable.runProp p cfg true propExpr) ⟨size⟩) cfg.numRetries
     match x with
-    | success (PSum.inl ()) => runSuiteAux p cfg r n
-    | gaveUp g => runSuiteAux p cfg (giveUp g r) n
+    | success (PSum.inl ()) => runSuiteAux p propExpr cfg r n
+    | gaveUp g => runSuiteAux p propExpr cfg (giveUp g r) n
     | _ => return x
 
 /-- Try to find a counter-example of `p`. -/
-def MetaTestable.runSuite (p : Prop) [MetaTestable p] (cfg : Configuration := {}) : Rand (MetaTestResult p) :=
-  MetaTestable.runSuiteAux p cfg (success <| PSum.inl ()) cfg.numInst
+def MetaTestable.runSuite (p : Prop) [MetaTestable p] (propExpr: Expr) (cfg : Configuration := {}) : MRand (MetaTestResult p) :=
+  MetaTestable.runSuiteAux p propExpr cfg (success <| PSum.inl ()) cfg.numInst
 
-/-- Run a test suite for `p` in `BaseIO` using the global RNG in `stdGenRef`. -/
-def MetaTestable.checkIO (p : Prop) [MetaTestable p] (cfg : Configuration := {}) : BaseIO (MetaTestResult p) :=
-  letI : MonadLift Id BaseIO := ⟨fun f => return Id.run f⟩
+/-- Run a test suite for `p` in `MetaM` using the global RNG in `stdGenRef`. -/
+def MetaTestable.checkIO (p : Prop) [MetaTestable p] (propExpr: Expr) (cfg : Configuration := {}) : MetaM (MetaTestResult p) :=
   match cfg.randomSeed with
-  | none => runRand (MetaTestable.runSuite p cfg)
-  | some seed => runRandWith seed (MetaTestable.runSuite p cfg)
+  | none => runRand (MetaTestable.runSuite p propExpr cfg)
+  | some seed => runRandWith seed (MetaTestable.runSuite p propExpr cfg)
 
 end IO
 
 open Decorations in
 /-- Run a test suite for `p` and throw an exception if `p` does not hold. -/
-def MetaTestable.check (p : Prop) (cfg : Configuration := {})
-    (p' : Decorations.DecorationsOf p := by mk_decorations) [MetaTestable p'] : Lean.CoreM PUnit := do
-  match ← MetaTestable.checkIO p' cfg with
+def MetaTestable.check (p : Prop)(propExpr: Expr) (cfg : Configuration := {})
+    (p' : Decorations.DecorationsOf p := by mk_decorations) [MetaTestable p'] : Lean.MetaM PUnit := do
+  match ← MetaTestable.checkIO p' propExpr cfg with
   | MetaTestResult.success _ => if !cfg.quiet then Lean.logInfo "Unable to find a counter-example"
   | MetaTestResult.gaveUp n =>
     if !cfg.quiet then
