@@ -339,6 +339,9 @@ namespace MetaTestable
 
 open MetaTestResult
 
+abbrev ProxyExpr α [SampleableExt α] := ToExpr (SampleableExt.proxy α)
+
+
 def runProp (p : Prop) [MetaTestable p] : Configuration → Bool → Expr → MGen (MetaTestResult p) := MetaTestable.run
 
 /-- A `dbgTrace` with special formatting -/
@@ -410,20 +413,6 @@ instance (priority := 100) forallTypesULiftTestable.{u}
     addVarInfo var "ULift Int" (· <| ULift Int) e r
 
 /--
-Format the counter-examples found in a test failure.
--/
-def formatFailure (s : String) (xs : List String) (n : Nat) : String :=
-  let counter := String.intercalate "\n" xs
-  let parts := [
-    "\n===================",
-    s,
-    counter,
-    s!"({n} shrinks)",
-    "-------------------"
-  ]
-  String.intercalate "\n" parts
-
-/--
 Increase the number of shrinking steps in a test result.
 -/
 def addShrinks (n : Nat) : MetaTestResult p → MetaTestResult p
@@ -441,7 +430,7 @@ candidate that falsifies a property and recursively shrinking that one.
 The process is guaranteed to terminate because `shrink x` produces
 a proof that all the values it produces are smaller (according to `SizeOf`)
 than `x`. -/
-partial def minimizeAux [SampleableExt α] [ToExpr (SampleableExt.proxy α)] {β : α → Prop} [∀ x, MetaTestable (β x)] (αExp βExpr: Expr) (cfg : Configuration)
+partial def minimizeAux [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x, MetaTestable (β x)] (αExp βExpr: Expr) (cfg : Configuration)
     (var : String) (x : SampleableExt.proxy α) (n : Nat) :
     OptionT MGen (Σ x, MetaTestResult (β (SampleableExt.interp x))) := do
   let candidates := SampleableExt.shrink.shrink x
@@ -467,7 +456,7 @@ partial def minimizeAux [SampleableExt α] [ToExpr (SampleableExt.proxy α)] {β
 
 /-- Once a property fails to hold on an example, look for smaller counter-examples
 to show the user. -/
-def minimize [SampleableExt α] [ToExpr (SampleableExt.proxy α)] {β : α → Prop} [∀ x, MetaTestable (β x)] (αExp βExpr: Expr)(cfg : Configuration)
+def minimize [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x, MetaTestable (β x)] (αExp βExpr: Expr)(cfg : Configuration)
     (var : String) (x : SampleableExt.proxy α) (r : MetaTestResult (β <| SampleableExt.interp x)) :
     MGen (Σ x, MetaTestResult (β <| SampleableExt.interp x)) := do
   if cfg.traceShrink then
@@ -478,7 +467,7 @@ def minimize [SampleableExt α] [ToExpr (SampleableExt.proxy α)] {β : α → P
 
 /-- Test a universal property by creating a sample of the right type and instantiating the
 bound variable with it. -/
-instance varTestable [SampleableExt α] [ToExpr (SampleableExt.proxy α)] {β : α → Prop} [∀ x, MetaTestable (β x)] :
+instance varTestable [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x, MetaTestable (β x)] :
     MetaTestable (NamedBinder var <| ∀ x : α, β x) where
   run := fun cfg min e => do
     match ← forallProp? e with
@@ -508,7 +497,6 @@ instance varTestable [SampleableExt α] [ToExpr (SampleableExt.proxy α)] {β : 
       addVarInfo var finalX (· <| SampleableExt.interp finalX) e' finalR
     | (_, _) => throwError m!"Expected a `Forall` proposition, got {← ppExpr e}"
 
-abbrev ProxyExpr α [SampleableExt α] := ToExpr (SampleableExt.proxy α)
 
 instance : ProxyExpr Bool := (inferInstance : ToExpr Bool)
 instance : ProxyExpr String := (inferInstance : ToExpr String)
@@ -521,6 +509,16 @@ instance : ProxyExpr UInt32 := (inferInstance : ToExpr UInt32)
 instance : ProxyExpr UInt64 := (inferInstance : ToExpr UInt64)
 instance : ProxyExpr UInt16 := (inferInstance : ToExpr UInt16)
 instance {n : Nat} : ProxyExpr (Fin n.succ) := (inferInstance : ToExpr (Fin n.succ))
+
+instance : ProxyExpr Prop := (inferInstance : ToExpr Bool)
+
+instance  [SampleableExt α][ProxyExpr α] : ProxyExpr (List α) :=
+  (inferInstance : ToExpr (List (SampleableExt.proxy α)))
+instance  [SampleableExt α][ProxyExpr α] : ProxyExpr (Array α) :=
+  (inferInstance : ToExpr (Array (SampleableExt.proxy α)))
+instance  [SampleableExt α][SampleableExt β] [ProxyExpr α][ProxyExpr β] : ProxyExpr (Prod α β) :=
+  (inferInstance : ToExpr (Prod (SampleableExt.proxy α) (SampleableExt.proxy β) ))
+
 
 theorem bool_to_prop_fmly (β : Prop → Prop): NamedBinder var (∀ (p : Prop), β p) → ∀ (b : Bool), β (b = true) := fun h b => h (b = true)
 
@@ -549,7 +547,7 @@ where
 instance (priority := 2000) subtypeVarTestable {p : α → Prop} {β : α → Prop}
     [∀ x, PrintableProp (p x)]
     [∀ x, MetaTestable (β x)]
-    [SampleableExt (Subtype p)] [ToExpr (SampleableExt.proxy (Subtype p))] {var'} :
+    [SampleableExt (Subtype p)] [ProxyExpr (Subtype p)] {var'} :
     MetaTestable (NamedBinder var <| (x : α) → NamedBinder var' <| p x → β x) where
   run cfg min e :=
     letI (x : Subtype p) : MetaTestable (β x) :=
@@ -641,7 +639,7 @@ def MetaTestable.check (p : Prop)(propExpr: Expr) (cfg : Configuration := {})
     if cfg.quiet then
       Lean.throwError msg
     else
-      Lean.throwError <| formatFailure msg xs n
+      Lean.throwError <| Testable.formatFailure msg xs n
 
 -- #eval MetaTestable.check (∀ (x y z a : Nat) (h1 : 3 < x) (h2 : 3 < y), x - y = y - x)
 --   Configuration.verbose
