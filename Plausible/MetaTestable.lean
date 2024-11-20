@@ -192,39 +192,6 @@ def equality? (e: Expr): MetaM (Option (Expr × Expr × Expr)) := do
   else
     return none
 
--- for testing
-open Lean Elab Term in
-elab "#decompose_prop" t:term : command =>
-  Command.liftTermElabM  do
-    let e ← elabType t
-    match ← orProp? e with
-    | (some α, some β) => logInfo s!"Or: {← ppExpr α}; {← ppExpr β}"
-    | _ => pure ()
-    match ← andProp? e with
-    | (some α, some β) => logInfo s!"And: {← ppExpr α}; {← ppExpr β}"
-    | _ => pure ()
-    match ← existsProp? e with
-    | (some α, some β) => logInfo s!"Exists: {← ppExpr α}; domain {← ppExpr β}"
-    | _ => pure ()
-    match ← forallProp? e with
-    | (some α, some β) => logInfo s!"Forall: {← ppExpr α}; domain {← ppExpr β}"
-    | _ => pure ()
-    match ← impProp? e with
-    | (some α, some β) => logInfo s!"Imp: {← ppExpr α}; {← ppExpr β}"
-    | _ => pure ()
-    match ← eqlProp? e with
-    | some (α, a, b) => logInfo s!"Eq: {← ppExpr α}; {← ppExpr a} and {← ppExpr b}"
-    | _ => pure ()
-    match ← iffProp? e with
-    | some (α, β) => logInfo s!"Iff: {← ppExpr α}; {← ppExpr β}"
-    | _ => pure ()
-
-#decompose_prop ∀ (n: Nat), n = 0 ∨ n ≠ 0
-#decompose_prop NamedBinder "blah" <| ∀ (n: Nat), n = 0 ∨ n ≠ 0
-#decompose_prop 1 = 0 ∨ 2 ≠ 0
-#decompose_prop 1 = 0 ∧ 2 ≠ 0
-#decompose_prop ∃ (n: Nat), n = 0 ∨ n ≠ 0
-
 
 end Matching
 
@@ -284,6 +251,12 @@ def combine {p q : Prop} : Unit ⊕' (p → q) → Unit ⊕' p → Unit ⊕' q
   | PSum.inr f, PSum.inr proof => PSum.inr <| f proof
   | _, _ => PSum.inl ()
 
+def checkDisproof (pf prop: Expr) : MetaM Unit := do
+  let negProp ← mkAppM ``Not #[prop]
+  let pfType ← inferType pf
+  unless ← isDefEq pfType negProp do
+    throwError m!"Expected a proof of {negProp}, got proof of {← ppExpr pfType}"
+
 /-- Combine the test result for properties `p` and `q` to create a test for their conjunction. -/
 def and : MetaTestResult p → MetaTestResult q → Expr →  MetaM (MetaTestResult (p ∧ q))
   | failure h pf xs n, _, e => do
@@ -293,6 +266,7 @@ def and : MetaTestResult p → MetaTestResult q → Expr →  MetaM (MetaTestRes
         let x ← mkAppOptM ``And.left #[e₁, e₂, h]
         let e' ← mkAppM' pf #[x]
         mkLambdaFVars #[h] e'
+      checkDisproof pf' e
       return failure (fun h2 => h h2.left) pf' xs n
     | (_, _) => throwError m!"Expected an `And` proposition, got {← ppExpr e}"
   | _, failure h pf xs n, e => do
@@ -302,6 +276,7 @@ def and : MetaTestResult p → MetaTestResult q → Expr →  MetaM (MetaTestRes
         let x ← mkAppOptM ``And.right #[e₁, e₂, h]
         let e' ← mkAppM' pf #[x]
         mkLambdaFVars #[h] e'
+      checkDisproof pf' e
       return failure (fun h2 => h h2.right) pf' xs n
     | (_, _) => throwError m!"Expected an `And` proposition, got {← ppExpr e}"
 
@@ -323,6 +298,7 @@ def or : MetaTestResult p → MetaTestResult q → Expr →  MetaM (MetaTestResu
         match h with
         | Or.inl h3 => h1 h3
         | Or.inr h3 => h2 h3
+      checkDisproof pf e
       return failure h3 pf (xs ++ ys) (n + m)
     | (_, _) => throwError m!"Expected an `Or` proposition, got {← ppExpr e}"
   | success h, _, _ => return success <|  combine (PSum.inr Or.inl) h
@@ -351,9 +327,10 @@ def iff (h : q ↔ p) (hExp: Expr) (r : MetaTestResult p) : MetaM (MetaTestResul
 we record that value using this function so that our counter-examples
 can be informative. -/
 def addInfo (x : String) (h : q → p) (hExp: Expr) (r : MetaTestResult p)
-    (p : Unit ⊕' (p → q) := PSum.inl ()) : (MetaM <| MetaTestResult q) :=
+    (p : Unit ⊕' (p → q) := PSum.inl ()) : (MetaM <| MetaTestResult q) := do
   if let failure h2 pf xs n := r then
-    return failure (mt h h2) pf (x :: xs) n
+    let pf' ← mkAppM ``mt #[hExp, pf]
+    return failure (mt h h2) pf' (x :: xs) n
   else
     imp h hExp r p
 
@@ -602,8 +579,9 @@ instance (priority := low) decidableTestable {p : Prop} [PrintableProp p] [Decid
       let s := printProp p
       let inst ←  synthInstance <| ← mkAppM ``Decidable #[e]
       let falseRefl ← mkAppM ``Eq.refl #[mkConst ``false]
-      let e' ← mkAppM ``of_decide_eq_false #[e, inst, falseRefl]
-      return failure h e' [s!"issue: {s} does not hold"] 0
+      let pf' ← mkAppOptM ``of_decide_eq_false #[e, inst, falseRefl]
+      checkDisproof pf' e
+      return failure h pf' [s!"issue: {s} does not hold"] 0
 
 end MetaTestable
 
