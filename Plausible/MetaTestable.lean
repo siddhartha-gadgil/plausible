@@ -111,8 +111,6 @@ def andProp? (e: Expr) : MetaM (Option Expr × Option Expr) := do
   else
     return (none, none)
 
-#check mkFreshLevelMVar
-
 def forallProp? (e: Expr) : MetaM (Option Expr × Option Expr) := do
   let u ← mkFreshLevelMVar
   let α ← mkFreshExprMVar (mkSort u)
@@ -223,10 +221,6 @@ inductive MetaTestResult (p : Prop) where
   -/
   | gaveUp : Nat → MetaTestResult p
   /--
-  There was a mismatch between `p` and the expression representing `p`
-  -/
-  | mismatch : String → MetaTestResult p
-  /--
   A counter-example to `p`; the strings specify values for the relevant variables.
   `failure h vs n` also carries a proof that `p` does not hold. This way, we can
   guarantee that there will be no false positive. The last component, `n`,
@@ -248,7 +242,6 @@ def toString : MetaTestResult p → String
   | success (PSum.inr _) => "success (proof)"
   | gaveUp n => s!"gave {n} times"
   | failure _ _ counters _ => s!"failed {counters}"
-  | mismatch s => s!"Mismatch: {s}"
 
 instance : ToString (MetaTestResult p) := ⟨toString⟩
 
@@ -267,7 +260,7 @@ def and : MetaTestResult p → MetaTestResult q → Expr →  MetaM (MetaTestRes
         let e' ← mkAppM' pf #[x]
         mkLambdaFVars #[h] e'
       return failure (fun h2 => h h2.left) pf' xs n
-    | (_, _) => throwError "Expected an `And` proposition"
+    | (_, _) => throwError m!"Expected an `And` proposition, got {← ppExpr e}"
   | _, failure h pf xs n, e => do
     match ← andProp? e with
     | (some e₁, some e₂) =>
@@ -276,14 +269,12 @@ def and : MetaTestResult p → MetaTestResult q → Expr →  MetaM (MetaTestRes
         let e' ← mkAppM' pf #[x]
         mkLambdaFVars #[h] e'
       return failure (fun h2 => h h2.right) pf' xs n
-    | (_, _) => throwError "Expected an `And` proposition"
+    | (_, _) => throwError m!"Expected an `And` proposition, got {← ppExpr e}"
 
   | success h1, success h2, _ => return success <| combine (combine (PSum.inr And.intro) h1) h2
   | gaveUp n, gaveUp m, _ => return gaveUp <| n + m
   | gaveUp n, _, _ => return gaveUp n
   | _, gaveUp n, _ => return gaveUp n
-  | mismatch s, _, _ => return mismatch s
-  | _, mismatch s, _ => return mismatch s
 
 
 /-- Combine the test result for properties `p` and `q` to create a test for their disjunction. -/
@@ -299,14 +290,12 @@ def or : MetaTestResult p → MetaTestResult q → Expr →  MetaM (MetaTestResu
         | Or.inl h3 => h1 h3
         | Or.inr h3 => h2 h3
       return failure h3 pf (xs ++ ys) (n + m)
-    | (_, _) => throwError "Expected an `Or` proposition"
+    | (_, _) => throwError m!"Expected an `Or` proposition, got {← ppExpr e}"
   | success h, _, _ => return success <|  combine (PSum.inr Or.inl) h
   | _, success h, _ => return success <|  combine (PSum.inr Or.inr) h
   | gaveUp n, gaveUp m, _ => return gaveUp <| n + m
   | gaveUp n, _, _ => return gaveUp n
   | _, gaveUp n, _ => return gaveUp n
-  | mismatch s, _, _ => return mismatch s
-  | _, mismatch s, _ => return mismatch s
 
 /-- If `q → p`, then `¬ p → ¬ q` which means that testing `p` can allow us
 to find counter-examples to `q`. -/
@@ -318,7 +307,6 @@ def imp (h : q → p) (hExp: Expr) (r : MetaTestResult p)
     return failure (mt h h2) pf' xs n
   | success h2 => return success <| combine p h2
   | gaveUp n => return gaveUp n
-  | mismatch s => return mismatch s
 
 /-- Test `q` by testing `p` and proving the equivalence between the two. -/
 def iff (h : q ↔ p) (hExp: Expr) (r : MetaTestResult p) : MetaM (MetaTestResult q) := do
@@ -389,7 +377,7 @@ instance iffTestable [MetaTestable ((p ∧ q) ∨ (¬ p ∧ ¬ q))] : MetaTestab
       let h ← runProp ((p ∧ q) ∨ (¬ p ∧ ¬ q)) cfg min e
       let hExp ← mkAppM ``iff_resolve #[α, β]
       iff (iff_resolve p q) hExp h
-    | none => return mismatch "Expected an `Iff` proposition"
+    | none => throwError m!"Expected an `Iff` proposition, got {← ppExpr e}"
 
 variable {var : String}
 
@@ -518,7 +506,7 @@ instance varTestable [SampleableExt α] [ToExpr (SampleableExt.proxy α)] {β : 
       let xInterp ← mkAppOptM ``SampleableExt.interp #[αExp, samp, xExpr]
       let e' ← mkAppM' βExp #[xInterp]
       addVarInfo var finalX (· <| SampleableExt.interp finalX) e' finalR
-    | (_, _) => throwError "Expected a `Forall` proposition"
+    | (_, _) => throwError m!"Expected a `Forall` proposition, got {← ppExpr e}"
 
 abbrev ProxyExpr α [SampleableExt α] := ToExpr (SampleableExt.proxy α)
 
@@ -546,7 +534,7 @@ where
       let p ←  MetaTestable.runProp (NamedBinder var <| ∀ b : Bool, β b) cfg min e
       let e' ← mkAppM ``bool_to_prop_fmly #[βExpr]
       imp (bool_to_prop_fmly β) e' p
-    | _ => throwError "Expected a `Forall` proposition"
+    | _ => throwError m!"Expected a `Forall` proposition, got {← ppExpr e}"
 
 instance (priority := high) unusedVarTestable {β : Prop} [Nonempty α] [MetaTestable β] :
   MetaTestable (NamedBinder var (α → β))
@@ -601,7 +589,6 @@ def retry (cmd : MRand (MetaTestResult p)) : Nat → MRand (MetaTestResult p)
     | .success hp => return success hp
     | .failure h pf xs n => return failure h pf xs n
     | .gaveUp _ => retry cmd n
-    | .mismatch s => return .mismatch s
 
 /-- Count the number of times the test procedure gave up. -/
 def giveUp (x : Nat) : MetaTestResult p → MetaTestResult p
@@ -609,7 +596,6 @@ def giveUp (x : Nat) : MetaTestResult p → MetaTestResult p
   | success (PSum.inr p) => success <| (PSum.inr p)
   | gaveUp n => gaveUp <| n + x
   | MetaTestResult.failure h pf xs n => failure h pf xs n
-  | mismatch _ => gaveUp x
 
 end MetaTestable
 
@@ -649,10 +635,6 @@ def MetaTestable.check (p : Prop)(propExpr: Expr) (cfg : Configuration := {})
   | MetaTestResult.gaveUp n =>
     if !cfg.quiet then
       let msg := s!"Gave up after failing to generate values that fulfill the preconditions {n} times."
-      Lean.logWarning msg
-  | MetaTestResult.mismatch s =>
-    if !cfg.quiet then
-      let msg := s!"Mismatch: {s}"
       Lean.logWarning msg
   | MetaTestResult.failure _ _ xs n =>
     let msg := "Found a counter-example!"
