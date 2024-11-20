@@ -156,10 +156,9 @@ def eqlProp? (e: Expr): MetaM (Option (Expr × Expr × Expr)) := do
     return none
 
 def iffProp? (e: Expr): MetaM (Option (Expr × Expr)) := do
-  let level ←  mkFreshLevelMVar
-  let u := mkSort level
-  let α ← mkFreshExprMVar u
-  let β ← mkFreshExprMVar α
+  let prop := mkSort levelZero
+  let α ← mkFreshExprMVar prop
+  let β ← mkFreshExprMVar prop
   let e' ← mkAppM ``Iff #[α , β]
   if ← isDefEq e' e then
     let α? ← Lean.getExprMVarAssignment? α.mvarId!
@@ -192,6 +191,41 @@ def equality? (e: Expr): MetaM (Option (Expr × Expr × Expr)) := do
     return triple
   else
     return none
+
+-- for testing
+open Lean Elab Term in
+elab "#decompose_prop" t:term : command =>
+  Command.liftTermElabM  do
+    let e ← elabType t
+    match ← orProp? e with
+    | (some α, some β) => logInfo s!"Or: {← ppExpr α}; {← ppExpr β}"
+    | _ => pure ()
+    match ← andProp? e with
+    | (some α, some β) => logInfo s!"And: {← ppExpr α}; {← ppExpr β}"
+    | _ => pure ()
+    match ← existsProp? e with
+    | (some α, some β) => logInfo s!"Exists: {← ppExpr α}; domain {← ppExpr β}"
+    | _ => pure ()
+    match ← forallProp? e with
+    | (some α, some β) => logInfo s!"Forall: {← ppExpr α}; domain {← ppExpr β}"
+    | _ => pure ()
+    match ← impProp? e with
+    | (some α, some β) => logInfo s!"Imp: {← ppExpr α}; {← ppExpr β}"
+    | _ => pure ()
+    match ← eqlProp? e with
+    | some (α, a, b) => logInfo s!"Eq: {← ppExpr α}; {← ppExpr a} and {← ppExpr b}"
+    | _ => pure ()
+    match ← iffProp? e with
+    | some (α, β) => logInfo s!"Iff: {← ppExpr α}; {← ppExpr β}"
+    | _ => pure ()
+
+#decompose_prop ∀ (n: Nat), n = 0 ∨ n ≠ 0
+#decompose_prop NamedBinder "blah" <| ∀ (n: Nat), n = 0 ∨ n ≠ 0
+#decompose_prop 1 = 0 ∨ 2 ≠ 0
+#decompose_prop 1 = 0 ∧ 2 ≠ 0
+#decompose_prop ∃ (n: Nat), n = 0 ∨ n ≠ 0
+
+
 end Matching
 
 open Lean Meta
