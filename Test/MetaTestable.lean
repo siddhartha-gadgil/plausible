@@ -1,7 +1,8 @@
 import Lean
 import Plausible.MetaTestable
 
-open Plausible Plausible.MetaTestable  Lean Meta Elab Term
+open Plausible Plausible.MetaTestable
+open Lean Meta Elab Term Tactic
 
 open Lean Elab Term in
 elab "#decompose_prop" t:term : command =>
@@ -20,7 +21,7 @@ elab "#decompose_prop" t:term : command =>
     | (some α, some β) => logInfo s!"Forall: {← ppExpr α}; domain {← ppExpr β}"
     | _ => pure ()
     match ← impProp? e with
-    | (some α, some β) => logInfo s!"Imp: {← ppExpr α}; {← ppExpr β}"
+    | (some α, some β) => logInfo s!"Implies: {← ppExpr α}; {← ppExpr β}"
     | _ => pure ()
     match ← eqlProp? e with
     | some (α, a, b) => logInfo s!"Eq: {← ppExpr α}; {← ppExpr a} and {← ppExpr b}"
@@ -49,36 +50,21 @@ elab "#decompose_prop" t:term : command =>
 #guard_msgs in
 #decompose_prop ∃ (n: Nat), n = 0 ∨ n ≠ 0
 
-#check List.nil
+/--
+info: Forall: fun x => 2 ≠ 0; domain 1 = 0
+---
+info: Implies: 1 = 0; 2 ≠ 0
+-/
+#guard_msgs in
+#decompose_prop 1 = 0 →  2 ≠ 0
+
+
+/-- info: Iff: 1 = 0; 2 ≠ 0 -/
+#guard_msgs in
+#decompose_prop 1 = 0 ↔   2 ≠ 0
 
 #check MetaTestResult.failure
 
--- Incorrect
-elab "mk_failure%" prop:term ";" pf:term ";" : term => do
-  let prop ← elabType prop
-  let notProp ← mkAppM ``Not #[prop]
-  logInfo s!"{repr notProp}"
-  let pf ← elabTerm pf notProp
-  logInfo s!"{repr pf}"
-  let lst ← mkAppOptM ``List.nil #[mkConst ``String]
-  let pfExpr := Lean.Expr.letE
-    `pf_var
-    notProp
-    pf
-    (Lean.Expr.app
-      (Lean.Expr.const `Lean.Expr.bvar [])
-        (Lean.Expr.const ``Nat.zero []))
-    true
-  logInfo s!"{repr pfExpr}"
-  mkAppOptM ``MetaTestResult.failure #[prop, pf, pfExpr, lst, mkConst ``Nat.zero]
-
-#check Lean.Expr.bvar
-
-def eg_fail_0 : MetaTestResult False :=
-  mk_failure% False ; fun (x: False) ↦ x ;
-
--- Incorrect; checks but extracting expression fails.
-#check eg_fail_0
 
 def eg_fail : MetaTestResult False :=
   @MetaTestResult.failure False (fun (x: False) ↦ x)
@@ -103,3 +89,56 @@ elab "#expr" e:term : command =>
     let e ← elabTerm e none
     logInfo s!"{repr e}"
     logInfo s!"{← reduce e}"
+
+elab "expr%" e:term : term => do
+    let e ← elabTerm e none
+    logInfo s!"{repr e}"
+    logInfo s!"{← reduce e}"
+    return e
+--
+
+structure MyType where
+  x : Nat
+  y : Nat
+  h : x ≤ y
+  deriving Repr
+
+#check fun (x y : Nat) (h : x ≤ y) =>  expr% (MyType.mk x y h)
+
+instance : Shrinkable MyType where
+  shrink := fun ⟨x, y, _⟩ =>
+    let proxy := Shrinkable.shrink (x, y - x)
+    proxy.map (fun (fst, snd) => ⟨fst, fst + snd, by omega⟩)
+
+instance : SampleableExt MyType :=
+  SampleableExt.mkSelfContained do
+    let x ← SampleableExt.interpSample Nat
+    let xyDiff ← SampleableExt.interpSample Nat
+    return ⟨x, x + xyDiff, by omega⟩
+
+set_option diagnostics true in
+-- #eval MetaTestable.check <| ∀ a b : MyType, a.y ≤ b.x → a.x ≤ b.y
+
+open Decorations Lean Elab Tactic
+
+elab "mk_decorations" : tactic => do
+  let goal ← getMainGoal
+  let goalType ← goal.getType
+  if let .app (.const ``Decorations.DecorationsOf _) body := goalType then
+    closeMainGoal `mk_decorations (← Decorations.addDecorations body)
+
+
+def de : Decorations.DecorationsOf (∀ a b : Nat, a ≤ b) := by mk_decorations
+
+#print de
+
+#synth MetaTestable <| (1: Nat) = 0
+
+#synth Testable (NamedBinder "a" (∀ (a : Nat), a ≤ 1))
+
+#synth MetaTestable (NamedBinder "a" (∀ (a : Nat), a ≤ 1))
+
+#synth MetaTestable (NamedBinder "a" (∀ (a : Nat), NamedBinder "b" (∀ (b : Nat), a ≤ b)))
+
+
+#eval MetaTestable.check (∀ (a : Nat), False) (propExpr := Lean.Expr.forallE `a (Lean.Expr.const `Nat []) (Lean.Expr.const `False []) (Lean.BinderInfo.default))

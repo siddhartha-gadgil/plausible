@@ -126,8 +126,9 @@ def forallProp? (e: Expr) : MetaM (Option Expr × Option Expr) := do
     return (none, none)
 
 def impProp? (e: Expr) : MetaM (Option Expr × Option Expr) := do
+  let u ← mkFreshLevelMVar
+  let α ← mkFreshExprMVar (mkSort u)
   let prop := mkSort levelZero
-  let α ← mkFreshExprMVar prop
   let β ← mkFreshExprMVar prop
   let e' ←  mkArrow α β
   if ← isDefEq e' e then
@@ -313,6 +314,7 @@ def imp (h : q → p) (hExp: Expr) (r : MetaTestResult p)
     (p : Unit ⊕' (p → q) := PSum.inl ()) : MetaM (MetaTestResult q) :=
   match r with
   | failure h2 pf xs n => do
+    logInfo s!"Implication: {hExp}; type {← inferType hExp}"
     let pf' ← mkAppM ``mt #[hExp, pf]
     return failure (mt h h2) pf' xs n
   | success h2 => return success <| combine p h2
@@ -329,14 +331,17 @@ can be informative. -/
 def addInfo (x : String) (h : q → p) (hExp: Expr) (r : MetaTestResult p)
     (p : Unit ⊕' (p → q) := PSum.inl ()) : (MetaM <| MetaTestResult q) := do
   if let failure h2 pf xs n := r then
+    logInfo s!"Adding info: {x} := {repr x}; type {← inferType hExp}"
     let pf' ← mkAppM ``mt #[hExp, pf]
+    logInfo s!"Proof: {pf'}"
     return failure (mt h h2) pf' (x :: xs) n
   else
     imp h hExp r p
 
 /-- Add some formatting to the information recorded by `addInfo`. -/
 def addVarInfo {γ : Type _} [Repr γ] (var : String) (x : γ) (h : q → p) (hExp: Expr) (r : MetaTestResult p)
-    (p : Unit ⊕' (p → q) := PSum.inl ()) : MetaM (MetaTestResult q) :=
+    (p : Unit ⊕' (p → q) := PSum.inl ()) : MetaM (MetaTestResult q) := do
+  logInfo "Adding var info"
   addInfo s!"{var} := {repr x}" h (hExp: Expr) r p
 
 def isFailure : MetaTestResult p → Bool
@@ -353,7 +358,9 @@ open MetaTestResult
 abbrev ProxyExpr α [SampleableExt α] := ToExpr (SampleableExt.proxy α)
 
 
-def runProp (p : Prop) [MetaTestable p] : Configuration → Bool → Expr → MGen (MetaTestResult p) := MetaTestable.run
+def runProp (p : Prop) [MetaTestable p] : Configuration → Bool → Expr → MGen (MetaTestResult p) := fun cfg b e => do
+  logInfo s!"Testing {e}"
+  MetaTestable.run cfg b e
 
 /-- A `dbgTrace` with special formatting -/
 def slimTrace {m : Type → Type _} [Pure m] (s : String) : m PUnit :=
@@ -399,9 +406,14 @@ instance decGuardTestable [PrintableProp p] [Decidable p] {β : p → Prop} [∀
     MetaTestable (NamedBinder var <| ∀ h, β h) where
   run := fun cfg min e => do
     if h : p then
-      let res := runProp (β h) cfg min e
-      let s := printProp p
-      ← (fun r => addInfo s!"guard: {s}" (· <| h) e r (PSum.inr <| fun q _ => q)) <$> res
+      match ← forallProp? e with
+      | (some βExp, some pExp) => do
+        let yExp ← mkAppM' βExp #[pExp]
+        let res := runProp (β h) cfg min yExp
+        let h' := (· <| h)
+        let s := printProp p
+        ← (fun r => addInfo s!"guard: {s}" h'  e r (PSum.inr <| fun q _ => q)) <$> res
+      | _ => throwError m!"Expected a `Forall` proposition, got {← ppExpr e}"
     else if cfg.traceDiscarded || cfg.traceSuccesses then
       let res := fun _ => return gaveUp 1
       let s := printProp p
@@ -454,6 +466,7 @@ partial def minimizeAux [SampleableExt α] [ProxyExpr α] {β : α → Prop} [�
     let samp ← synthInstance <| ← mkAppM ``SampleableExt #[αExp]
     let xInterp ← mkAppOptM ``SampleableExt.interp #[αExp, samp, xExpr]
     let e' ← mkAppM' βExpr #[xInterp]
+    logInfo "Minimize"
     let res ← OptionT.lift <| MetaTestable.runProp (β (SampleableExt.interp candidate)) cfg true e'
     if res.isFailure then
       if cfg.traceShrink then
@@ -490,6 +503,7 @@ instance varTestable [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x
       let e' ← mkAppM' βExp #[xInterp]
       if cfg.traceSuccesses || cfg.traceDiscarded then
         slimTrace s!"{var} := {repr x}"
+      logInfo s!"variable testable: outer prop: {e}, inner prop: {e'}"
       let r ← MetaTestable.runProp (β <| SampleableExt.interp x) cfg false e'
       let ⟨finalX, finalR⟩ ←
         if isFailure r then
@@ -540,6 +554,7 @@ where
   run := fun cfg min e => do
     match ← forallProp? e with
     | (some βExpr, _) =>
+      logInfo s!"prop variable testable: outer prop: {e}, inner prop: {βExpr}"
       let p ←  MetaTestable.runProp (NamedBinder var <| ∀ b : Bool, β b) cfg min e
       let e' ← mkAppM ``bool_to_prop_fmly #[βExpr]
       imp (bool_to_prop_fmly β) e' p
@@ -551,9 +566,20 @@ where
   run := fun cfg min e => do
     if cfg.traceDiscarded || cfg.traceSuccesses then
       slimTrace s!"{var} is unused"
-    let r ← MetaTestable.runProp β cfg min e
-    let finalR ←  addInfo s!"{var} is irrelevant (unused)" id e r
-    imp (· <| Classical.ofNonempty) e finalR  (PSum.inr <| fun x _ => x)
+    logInfo s!"unused variable testable: outer prop: {e}"
+    match ← impProp? e with
+    | (some aExp, some e') =>
+      let r ← MetaTestable.runProp β cfg min e'
+      let hExp ← mkAppOptM ``id #[e']
+      let finalR ←  addInfo s!"{var} is irrelevant (unused)" id hExp r
+      let h := (· <| Classical.ofNonempty)
+      let nInst ← synthInstance <| ← mkAppM ``Nonempty #[aExp]
+      logInfo "building h expression"
+      let hExp ← withLocalDeclD `h e fun h => do
+        mkLambdaFVars #[h] <| mkApp h nInst
+      logInfo m!"Calling imp; hExpr of type {← inferType hExp}"
+      imp h hExp finalR  (PSum.inr <| fun x _ => x)
+    | _ => throwError m!"Expected an `Imp` proposition, got {← ppExpr e}"
 
 instance (priority := 2000) subtypeVarTestable {p : α → Prop} {β : α → Prop}
     [∀ x, PrintableProp (p x)]
@@ -579,14 +605,17 @@ instance (priority := low) decidableTestable {p : Prop} [PrintableProp p] [Decid
       let s := printProp p
       let inst ←  synthInstance <| ← mkAppM ``Decidable #[e]
       let falseRefl ← mkAppM ``Eq.refl #[mkConst ``false]
+      logInfo "Decidable used; building proof"
       let pf' ← mkAppOptM ``of_decide_eq_false #[e, inst, falseRefl]
+      logInfo "Decidable proof built"
       checkDisproof pf' e
+      logInfo "Decidable proof checked"
       return failure h pf' [s!"issue: {s} does not hold"] 0
 
 end MetaTestable
 
 
-section IO
+section Meta
 open MetaTestResult
 
 namespace MetaTestable
@@ -629,29 +658,33 @@ def MetaTestable.runSuite (p : Prop) [MetaTestable p] (propExpr: Expr) (cfg : Co
   MetaTestable.runSuiteAux p propExpr cfg (success <| PSum.inl ()) cfg.numInst
 
 /-- Run a test suite for `p` in `MetaM` using the global RNG in `stdGenRef`. -/
-def MetaTestable.checkIO (p : Prop) [MetaTestable p] (propExpr: Expr) (cfg : Configuration := {}) : MetaM (MetaTestResult p) :=
+def MetaTestable.checkM (p : Prop) [MetaTestable p]  (cfg : Configuration := {}) (propExpr: Expr) : MetaM (MetaTestResult p) :=
   match cfg.randomSeed with
   | none => runRand (MetaTestable.runSuite p propExpr cfg)
   | some seed => runRandWith seed (MetaTestable.runSuite p propExpr cfg)
 
-end IO
+end Meta
 
 open Decorations in
 /-- Run a test suite for `p` and throw an exception if `p` does not hold. -/
-def MetaTestable.check (p : Prop)(propExpr: Expr) (cfg : Configuration := {})
-    (p' : Decorations.DecorationsOf p := by mk_decorations) [MetaTestable p'] : Lean.MetaM PUnit := do
-  match ← MetaTestable.checkIO p' propExpr cfg with
-  | MetaTestResult.success _ => if !cfg.quiet then Lean.logInfo "Unable to find a counter-example"
+def MetaTestable.check (p : Prop) (cfg : Configuration := {})
+    (p' : Decorations.DecorationsOf p := by mk_decorations) [MetaTestable p'](propExpr: Expr) : Lean.MetaM (Option Expr) := do
+  match ← MetaTestable.checkM p' cfg propExpr with
+  | MetaTestResult.success _ =>
+    if !cfg.quiet then Lean.logInfo "Unable to find a counter-example"
+    return none
   | MetaTestResult.gaveUp n =>
     if !cfg.quiet then
       let msg := s!"Gave up after failing to generate values that fulfill the preconditions {n} times."
       Lean.logWarning msg
-  | MetaTestResult.failure _ _ xs n =>
+    return none
+  | MetaTestResult.failure _ pf xs n =>
     let msg := "Found a counter-example!"
     if cfg.quiet then
-      Lean.throwError msg
+      Lean.logWarning msg
     else
-      Lean.throwError <| Testable.formatFailure msg xs n
+      Lean.logWarning <| Testable.formatFailure msg xs n
+    return some pf
 
 -- #eval MetaTestable.check (∀ (x y z a : Nat) (h1 : 3 < x) (h2 : 3 < y), x - y = y - x)
 --   Configuration.verbose
