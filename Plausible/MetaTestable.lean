@@ -463,7 +463,10 @@ partial def minimizeAux [SampleableExt α] [ProxyExpr α] {β : α → Prop} [�
     if cfg.traceShrinkCandidates then
       slimTrace s!"Trying {var} := {repr candidate}"
     let xExpr := toExpr candidate
-    let samp ← synthInstance <| ← mkAppM ``SampleableExt #[αExp]
+    let .sort u := ← inferType αExp | throwError m!"Expected a sort, got {αExp}"
+    let v ←  mkFreshLevelMVar
+    let instType :=  mkApp (mkConst ``SampleableExt [u, v]) αExp
+    let samp ← synthInstance instType
     let xInterp ← mkAppOptM ``SampleableExt.interp #[αExp, samp, xExpr]
     let e' ← mkAppM' βExpr #[xInterp]
     logInfo "Minimize"
@@ -498,7 +501,12 @@ instance varTestable [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x
     | (some βExp, some αExp) => do
       let x ← SampleableExt.sample
       let xExpr := toExpr x
-      let samp ← synthInstance <| ← mkAppM ``SampleableExt #[αExp]
+      let αExp ← instantiateMVars αExp
+      let .sort u := ← inferType αExp | throwError m!"Expected a sort, got {αExp}"
+      let v ←  mkFreshLevelMVar
+      let instType :=  mkApp (mkConst ``SampleableExt [u, v]) αExp
+      let samp ← synthInstance instType
+      -- logInfo s!"Instance: {samp}"
       let xInterp ← mkAppOptM ``SampleableExt.interp #[αExp, samp, xExpr]
       let e' ← mkAppM' βExp #[xInterp]
       if cfg.traceSuccesses || cfg.traceDiscarded then
@@ -516,10 +524,16 @@ instance varTestable [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x
         else
           pure ⟨x, r⟩
       let xExpr := toExpr finalX
-      let samp ← synthInstance <| ← mkAppM ``SampleableExt #[αExp]
+      let .sort u := ← inferType αExp | throwError m!"Expected a sort, got {αExp}"
+      let v ←  mkFreshLevelMVar
+      let instType :=  mkApp (mkConst ``SampleableExt [u, v]) αExp
+      let samp ← synthInstance instType
       let xInterp ← mkAppOptM ``SampleableExt.interp #[αExp, samp, xExpr]
+      let h := (· <| SampleableExt.interp finalX)
       let e' ← mkAppM' βExp #[xInterp]
-      addVarInfo var finalX (· <| SampleableExt.interp finalX) e' finalR
+      let hExpr ← withLocalDeclD `h e fun h => do
+        mkLambdaFVars #[h] (mkApp h e')
+      addVarInfo var finalX h hExpr finalR
     | (_, _) => throwError m!"Expected a `Forall` proposition, got {← ppExpr e}"
 
 

@@ -142,3 +142,19 @@ def de : Decorations.DecorationsOf (∀ a b : Nat, a ≤ b) := by mk_decorations
 
 
 #eval MetaTestable.check (∀ (a : Nat), False) (propExpr := Lean.Expr.forallE `a (Lean.Expr.const `Nat []) (Lean.Expr.const `False []) (Lean.BinderInfo.default))
+
+/-
+AppBuilder for 'mkAppM', result contains metavariables
+  SampleableExt Nat
+-/
+set_option pp.universes true
+#eval MetaTestable.check (∀ (a : Nat), a < 1) (propExpr := Lean.Expr.forallE `a (Lean.Expr.const `Nat []) (Lean.Expr.const `False []) (Lean.BinderInfo.default))
+
+set_option pp.all true in
+-- #eval MetaTestable.check (∀ (a b : Nat), a < b) (propExpr := Lean.Expr.forallE `a (Lean.Expr.const `Nat []) (Lean.Expr.const `False []) (Lean.BinderInfo.default))
+
+def samp := SampleableExt Nat
+#print samp
+
+#synth SampleableExt Nat
+#check Nat.sampleableExt
