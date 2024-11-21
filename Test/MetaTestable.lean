@@ -53,43 +53,53 @@ elab "#decompose_prop" t:term : command =>
 
 #check MetaTestResult.failure
 
+-- Incorrect
 elab "mk_failure%" prop:term ";" pf:term ";" : term => do
   let prop ← elabType prop
   let notProp ← mkAppM ``Not #[prop]
+  logInfo s!"{repr notProp}"
   let pf ← elabTerm pf notProp
+  logInfo s!"{repr pf}"
   let lst ← mkAppOptM ``List.nil #[mkConst ``String]
   let pfExpr := Lean.Expr.letE
     `pf_var
-    (notProp)
-    (pf)
+    notProp
+    pf
     (Lean.Expr.app
-      (Lean.Expr.const `Lean.Expr.fvar [])
-      (Lean.Expr.app
-        (Lean.Expr.const `Lean.FVarId.mk [])
-        (Lean.Expr.app (Lean.Expr.const `Lean.Name.mkStr1 []) (Lean.Expr.lit (Lean.Literal.strVal "pf_var")))))
-    false
+      (Lean.Expr.const `Lean.Expr.bvar [])
+        (Lean.Expr.const ``Nat.zero []))
+    true
   logInfo s!"{repr pfExpr}"
   mkAppOptM ``MetaTestResult.failure #[prop, pf, pfExpr, lst, mkConst ``Nat.zero]
 
-set_option pp.proofs true in
-#check mk_failure% False ; fun (x: False) ↦ x ;
+#check Lean.Expr.bvar
+
+def eg_fail_0 : MetaTestResult False :=
+  mk_failure% False ; fun (x: False) ↦ x ;
+
+-- Incorrect; checks but extracting expression fails.
+#check eg_fail_0
+
+def eg_fail : MetaTestResult False :=
+  @MetaTestResult.failure False (fun (x: False) ↦ x)
+    (Lean.Expr.lam `x (Lean.Expr.const `False []) (Lean.Expr.bvar 0) (Lean.BinderInfo.default)) [] 0
+
+def disproofExpr {p: Prop} : MetaTestResult p → MetaM Lean.Expr
+  | MetaTestResult.failure _ pfExpr _ _  => do
+    return pfExpr
+  | _ =>
+    throwError "disproofExpr: expected failure"
+
+elab "disproof_expr_eg%" : term => do
+  disproofExpr eg_fail
+
+/-
+fun x => x : False → False
+-/
+#check disproof_expr_eg%
 
 elab "#expr" e:term : command =>
   Command.liftTermElabM  do
     let e ← elabTerm e none
     logInfo s!"{repr e}"
     logInfo s!"{← reduce e}"
-
-#check Expr.fvar {name := `n}
-
-/-
-Lean.Expr.fvar (Lean.FVarId.mk (Lean.Name.mkStr1 "n"))
--/
-#expr (
-    let pf_var : Nat := 0
-    Expr.fvar {name := `pf_var})
-#expr Lean.mkConst ``Nat
-
-#check Lean.Expr.fvar (Lean.FVarId.mk (Lean.Name.mkStr1 "n"))
-
-#check Lean.Expr.mvar (Lean.MVarId.mk (Lean.Name.mkStr1 "n"))
