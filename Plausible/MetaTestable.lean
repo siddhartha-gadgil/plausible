@@ -126,6 +126,24 @@ def forallProp? (e: Expr) : MetaM (Option Expr × Option Expr) := do
   else
     return (none, none)
 
+def forallPropProp? (e: Expr) : MetaM (Option Expr × Option Expr × Option Expr) := do
+  let u ← mkFreshLevelMVar
+  let α ← mkFreshExprMVar (mkSort u)
+  let prop := mkSort levelZero
+  let fmlyType ← mkArrow α prop
+  let fmly ← mkFreshExprMVar (some fmlyType)
+  let p ← mkFreshExprMVar (some fmlyType)
+  let e' ← withLocalDeclD `x α fun x => do
+    let y ← mkAppM' fmly #[x]
+    let y' ← mkAppM' p #[x]
+    let cod ← mkArrow y' y
+    mkForallFVars #[x] cod
+  if ← isDefEq e' e then
+    return (← Lean.getExprMVarAssignment? p.mvarId!, ← Lean.getExprMVarAssignment? fmly.mvarId!, ← Lean.getExprMVarAssignment? α.mvarId!)
+  else
+    return (none, none, none)
+
+
 def impProp? (e: Expr) : MetaM (Option Expr × Option Expr) := do
   let u ← mkFreshLevelMVar
   let α ← mkFreshExprMVar (mkSort u)
@@ -582,20 +600,31 @@ where
       mkLambdaFVars #[h] <| mkApp h nInst
     imp h hExp finalR  (PSum.inr <| fun x _ => x)
 
+theorem prop_iff_subtype (p : α → Prop) (β : α → Prop) : NamedBinder var (∀ (x : α), NamedBinder var' (p x → β x)) ↔ ∀ (x : Subtype p), β x.val := by simp [Subtype.forall, NamedBinder]
+
 instance (priority := 2000) subtypeVarTestable {p : α → Prop} {β : α → Prop}
     [∀ x, PrintableProp (p x)]
-    [∀ x, MetaTestable (β x)]
+    [∀ x, MetaTestable (β x)][ToExpr α]
     [SampleableExt (Subtype p)] [ProxyExpr (Subtype p)] {var'} :
     MetaTestable (NamedBinder var <| (x : α) → NamedBinder var' <| p x → β x) where
-  run cfg min e :=
+  run cfg min e := do
+    let (some pExp, some βExp, some _) ← forallPropProp? e | throwError m!"Expected a `Forall` proposition with arrow, got {← ppExpr e}"
+    let subType ← mkAppM ``Subtype #[pExp]
     letI (x : Subtype p) : MetaTestable (β x) :=
       { run := fun cfg min e => do
-          let r ← MetaTestable.runProp (β x.val) cfg min e
-          addInfo s!"guard: {printProp (p x)} (by construction)" id e r (PSum.inr id) }
+          let xExp := toExpr x.val
+          let y ← mkAppM' βExp #[xExp]
+          let r ← MetaTestable.runProp (β x.val) cfg min y
+          let idExp ← mkAppOptM ``id #[e]
+          addInfo s!"guard: {printProp (p x)} (by construction)" id idExp r (PSum.inr id) }
     do
-      let r ← @MetaTestable.run (∀ x : Subtype p, β x.val) (@varTestable var _ _ _ _ _) cfg min e
-      have := by simp [Subtype.forall, NamedBinder]
-      iff this e r
+      let e' ← withLocalDeclD `x subType fun x => do
+        let x' ← mkAppM ``Subtype.val #[x]
+        let y ← mkAppM' βExp #[x']
+        mkForallFVars #[x] y
+      let r ← @MetaTestable.run (∀ x : Subtype p, β x.val) (@varTestable var _ _ _ _ _) cfg min e'
+      let hExp ← mkAppM ``prop_iff_subtype #[pExp, βExp]
+      iff (prop_iff_subtype p β) hExp r
 
 instance (priority := low) decidableTestable {p : Prop} [PrintableProp p] [Decidable p] :
     MetaTestable p where
@@ -608,6 +637,7 @@ instance (priority := low) decidableTestable {p : Prop} [PrintableProp p] [Decid
       let falseRefl ← mkAppM ``Eq.refl #[mkConst ``false]
       let pf' ← mkAppOptM ``of_decide_eq_false #[e, inst, falseRefl]
       checkDisproof pf' e
+      -- logInfo "Decidable proof checked"
       return failure h pf' [s!"issue: {s} does not hold"] 0
 
 end MetaTestable
