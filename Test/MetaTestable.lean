@@ -140,7 +140,7 @@ def de : Decorations.DecorationsOf (∀ a b : Nat, a ≤ b) := by mk_decorations
 
 #synth MetaTestable (NamedBinder "a" (∀ (a : Nat), NamedBinder "b" (∀ (b : Nat), a ≤ b)))
 
-
+set_option pp.universes true in
 #eval MetaTestable.check (∀ (a : Nat), False) (propExpr := Lean.Expr.forallE `a (Lean.Expr.const `Nat []) (Lean.Expr.const `False []) (Lean.BinderInfo.default))
 
 /-
@@ -169,7 +169,7 @@ set_option pp.universes true in
     (Lean.BinderInfo.default))
   (Lean.BinderInfo.default)))
 
-
+set_option linter.unusedVariables false in
 #eval MetaTestable.check (∀ (a b : Nat), a < 0) (propExpr := (Lean.Expr.forallE
   `a
   (Lean.Expr.const `Nat [])
@@ -192,3 +192,15 @@ set_option pp.universes true in
 #expr ∀ (a b : Nat), a < 0
 
 #check Lean.Expr.lit (Lean.Literal.natVal 0)
+
+#expr Expr → MetaM (Option Expr)
+
+
+elab "disprove%" t:term : term => do
+  let tgt ← elabType t
+  let cfg : Configuration := {}
+  let (some code') ← disproveM? cfg tgt | throwError "disprove% failed"
+  logInfo s!"disproof: {← ppExpr code'}; \ntype: {← ppExpr <| (← inferType code')}"
+  return tgt
+
+#check disprove% ∀ (a b : Nat), a < b
