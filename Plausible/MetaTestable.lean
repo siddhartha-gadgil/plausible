@@ -3,6 +3,7 @@ Copyright (c) 2022 Henrik Böving. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Henrik Böving, Simon Hudon
 -/
+import Lean.Meta
 import Lean.Elab.Tactic.Config
 import Plausible.Sampleable
 import Plausible.Testable
@@ -332,6 +333,8 @@ def addInfo (x : String) (h : q → p) (hExp: Expr) (r : MetaTestResult p)
     (p : Unit ⊕' (p → q) := PSum.inl ()) : (MetaM <| MetaTestResult q) := do
   if let failure h2 pf xs n := r then
     logInfo s!"Adding info: {x} := {repr x}; type {← inferType hExp}"
+    logInfo s!"proof type: {← ppExpr <| ← inferType pf}"
+    logInfo s!"hExp type: {← ppExpr <| ← inferType hExp}"
     let pf' ← mkAppM ``mt #[hExp, pf]
     logInfo s!"Proof: {pf'}"
     return failure (mt h h2) pf' (x :: xs) n
@@ -411,8 +414,17 @@ instance decGuardTestable [PrintableProp p] [Decidable p] {β : p → Prop} [∀
         let yExp ← mkAppM' βExp #[pExp]
         let res := runProp (β h) cfg min yExp
         let h' := (· <| h)
+        let decInstType ← mkAppM ``Decidable #[pExp]
+        let inst ← synthInstance decInstType
+        let falseRefl ← mkAppM ``Eq.refl #[mkConst ``false]
+        logInfo "Decidable used; building proof"
+        let pf ← mkAppOptM ``of_decide_eq_true #[pExp, inst, falseRefl]
+        let cod := mkApp βExp pf
+        let hExp ← withLocalDeclD `x (← mkArrow pExp cod) fun x => do
+          let y ← mkAppM' x #[cod]
+          mkLambdaFVars #[x] y
         let s := printProp p
-        ← (fun r => addInfo s!"guard: {s}" h'  e r (PSum.inr <| fun q _ => q)) <$> res
+        ← (fun r => addInfo s!"guard: {s}" h' hExp r (PSum.inr <| fun q _ => q)) <$> res
       | _ => throwError m!"Expected a `Forall` proposition, got {← ppExpr e}"
     else if cfg.traceDiscarded || cfg.traceSuccesses then
       let res := fun _ => return gaveUp 1
@@ -492,6 +504,7 @@ def minimize [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x, MetaTe
   let res ← OptionT.run <| minimizeAux αExp βExpr cfg var x 0
   return res.getD ⟨x, r⟩
 
+open Lean Meta Elab Term Tactic in
 /-- Test a universal property by creating a sample of the right type and instantiating the
 bound variable with it. -/
 instance varTestable [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x, MetaTestable (β x)] :
@@ -509,6 +522,7 @@ instance varTestable [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x
       -- logInfo s!"Instance: {samp}"
       let xInterp ← mkAppOptM ``SampleableExt.interp #[αExp, samp, xExpr]
       let e' ← mkAppM' βExp #[xInterp]
+      let (e', _) ← dsimp e' {}
       if cfg.traceSuccesses || cfg.traceDiscarded then
         slimTrace s!"{var} := {repr x}"
       logInfo s!"variable testable: outer prop: {e}, inner prop: {e'}"
@@ -531,8 +545,9 @@ instance varTestable [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x
       let xInterp ← mkAppOptM ``SampleableExt.interp #[αExp, samp, xExpr]
       let h := (· <| SampleableExt.interp finalX)
       let e' ← mkAppM' βExp #[xInterp]
-      let hExpr ← withLocalDeclD `h e fun h => do
-        mkLambdaFVars #[h] (mkApp h e')
+      logInfo s!"Adding var info from varTestable, goal : {← ppExpr e}"
+      let hExpr ← withLocalDeclD `x e fun x => do
+        mkLambdaFVars #[x] (mkApp x xInterp)
       addVarInfo var finalX h hExpr finalR
     | (_, _) => throwError m!"Expected a `Forall` proposition, got {← ppExpr e}"
 

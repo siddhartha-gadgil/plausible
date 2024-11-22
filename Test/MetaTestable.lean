@@ -147,14 +147,48 @@ def de : Decorations.DecorationsOf (∀ a b : Nat, a ≤ b) := by mk_decorations
 AppBuilder for 'mkAppM', result contains metavariables
   SampleableExt Nat
 -/
-set_option pp.universes true
+set_option pp.universes true in
 #eval MetaTestable.check (∀ (a : Nat), a < 1) (propExpr := Lean.Expr.forallE `a (Lean.Expr.const `Nat []) (Lean.Expr.const `False []) (Lean.BinderInfo.default))
 
-set_option pp.all true in
--- #eval MetaTestable.check (∀ (a b : Nat), a < b) (propExpr := Lean.Expr.forallE `a (Lean.Expr.const `Nat []) (Lean.Expr.const `False []) (Lean.BinderInfo.default))
 
-def samp := SampleableExt Nat
-#print samp
+#eval MetaTestable.check (∀ (a b : Nat), a < b) (propExpr := (Lean.Expr.forallE
+  `a
+  (Lean.Expr.const `Nat [])
+  (Lean.Expr.forallE
+    `b
+    (Lean.Expr.const `Nat [])
+    (Lean.Expr.app
+      (Lean.Expr.app
+        (Lean.Expr.app
+          (Lean.Expr.app
+            (Lean.Expr.const `LT.lt [Level.succ Level.zero])
+            (Lean.Expr.const `Nat []))
+          (Lean.Expr.const `instLTNat []))
+        (Lean.Expr.bvar 1))
+      (Lean.Expr.bvar 0))
+    (Lean.BinderInfo.default))
+  (Lean.BinderInfo.default)))
 
-#synth SampleableExt Nat
-#check Nat.sampleableExt
+
+#eval MetaTestable.check (∀ (a b : Nat), a < 0) (propExpr := (Lean.Expr.forallE
+  `a
+  (Lean.Expr.const `Nat [])
+  (Lean.Expr.forallE
+    `b
+    (Lean.Expr.const `Nat [])
+    (Lean.Expr.app
+      (Lean.Expr.app
+        (Lean.Expr.app
+          (Lean.Expr.app
+            (Lean.Expr.const `LT.lt [Level.succ Level.zero])
+            (Lean.Expr.const `Nat []))
+          (Lean.Expr.const `instLTNat []))
+        (Lean.Expr.bvar 1))
+      (Lean.Expr.lit (Lean.Literal.natVal 0)))
+    (Lean.BinderInfo.default))
+  (Lean.BinderInfo.default)))
+
+#expr ∀ (a b : Nat), a < b
+#expr ∀ (a b : Nat), a < 0
+
+#check Lean.Expr.lit (Lean.Literal.natVal 0)
