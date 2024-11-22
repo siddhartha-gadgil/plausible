@@ -204,3 +204,7 @@ elab "disprove%" t:term : term => do
   return tgt
 
 #check disprove% ∀ (a b : Nat), a < b
+
+#check disprove% ∀ (a b : Nat), a < b ∨ b < a
+
+#check disprove% False ∧ False

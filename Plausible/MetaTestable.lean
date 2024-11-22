@@ -327,11 +327,11 @@ can be informative. -/
 def addInfo (x : String) (h : q → p) (hExp: Expr) (r : MetaTestResult p)
     (p : Unit ⊕' (p → q) := PSum.inl ()) : (MetaM <| MetaTestResult q) := do
   if let failure h2 pf xs n := r then
-    logInfo s!"Adding info: {x} := {repr x}; type {← inferType hExp}"
-    logInfo s!"proof type: {← ppExpr <| ← inferType pf}"
-    logInfo s!"hExp type: {← ppExpr <| ← inferType hExp}"
+    -- logInfo s!"Adding info: {x} := {repr x}; type {← inferType hExp}"
+    -- logInfo s!"proof type: {← ppExpr <| ← inferType pf}"
+    -- logInfo s!"hExp type: {← ppExpr <| ← inferType hExp}"
     let pf' ← mkAppM ``mt #[hExp, pf]
-    logInfo s!"Proof: {pf'}"
+    -- logInfo s!"Proof: {pf'}"
     return failure (mt h h2) pf' (x :: xs) n
   else
     imp h hExp r p
@@ -339,7 +339,7 @@ def addInfo (x : String) (h : q → p) (hExp: Expr) (r : MetaTestResult p)
 /-- Add some formatting to the information recorded by `addInfo`. -/
 def addVarInfo {γ : Type _} [Repr γ] (var : String) (x : γ) (h : q → p) (hExp: Expr) (r : MetaTestResult p)
     (p : Unit ⊕' (p → q) := PSum.inl ()) : MetaM (MetaTestResult q) := do
-  logInfo "Adding var info"
+  -- logInfo "Adding var info"
   addInfo s!"{var} := {repr x}" h (hExp: Expr) r p
 
 def isFailure : MetaTestResult p → Bool
@@ -357,7 +357,7 @@ abbrev ProxyExpr α [SampleableExt α] := ToExpr (SampleableExt.proxy α)
 
 
 def runProp (p : Prop) [MetaTestable p] : Configuration → Bool → Expr → MGen (MetaTestResult p) := fun cfg b e => do
-  logInfo s!"Testing {e}"
+  -- logInfo s!"Testing {e}"
   MetaTestable.run cfg b e
 
 /-- A `dbgTrace` with special formatting -/
@@ -366,20 +366,22 @@ def slimTrace {m : Type → Type _} [Pure m] (s : String) : m PUnit :=
 
 instance andTestable [MetaTestable p] [MetaTestable q] : MetaTestable (p ∧ q) where
   run := fun cfg min e => do
-    let xp ← runProp p cfg min e
-    let xq ← runProp q cfg min e
+    let (some e₁, some e₂) ← andProp? e | throwError m!"Expected an `And` proposition, got {← ppExpr e}"
+    let xp ← runProp p cfg min e₁
+    let xq ← runProp q cfg min e₂
     and xp xq e
 
 instance orTestable [MetaTestable p] [MetaTestable q] : MetaTestable (p ∨ q) where
   run := fun cfg min e => do
-    let xp ← runProp p cfg min e
+    let (some e₁, some e₂) ← orProp? e | throwError m!"Expected an `Or` proposition, got {← ppExpr e}"
+    let xp ← runProp p cfg min e₁
     -- As a little performance optimization we can just not run the second
     -- test if the first succeeds
     match xp with
     | success (PSum.inl h) => return success (PSum.inl h)
     | success (PSum.inr h) => return success (PSum.inr <| Or.inl h)
     | _ =>
-      let xq ← runProp q cfg min e
+      let xq ← runProp q cfg min e₂
       or xp xq e
 
 theorem iff_resolve (p q : Prop) : (p ↔ q) ↔ p ∧ q ∨ ¬p ∧ ¬q := by
@@ -409,7 +411,7 @@ instance decGuardTestable [PrintableProp p] [Decidable p] {β : p → Prop} [∀
       let decInstType ← mkAppM ``Decidable #[pExp]
       let inst ← synthInstance decInstType
       let falseRefl ← mkAppM ``Eq.refl #[mkConst ``false]
-      logInfo "Decidable used; building proof"
+      -- logInfo "Decidable used; building proof"
       let pf ← mkAppOptM ``of_decide_eq_true #[pExp, inst, falseRefl]
       let cod := mkApp βExp pf
       let hExp ← withLocalDeclD `x (← mkArrow pExp cod) fun x => do
@@ -472,7 +474,7 @@ partial def minimizeAux [SampleableExt α] [ProxyExpr α] {β : α → Prop} [�
     let samp ← synthInstance instType
     let xInterp ← mkAppOptM ``SampleableExt.interp #[αExp, samp, xExpr]
     let e' ← mkAppM' βExpr #[xInterp]
-    logInfo "Minimize"
+    -- logInfo "Minimize"
     let res ← OptionT.lift <| MetaTestable.runProp (β (SampleableExt.interp candidate)) cfg true e'
     if res.isFailure then
       if cfg.traceShrink then
@@ -515,7 +517,7 @@ instance varTestable [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x
     let (e', _) ← dsimp e' {}
     if cfg.traceSuccesses || cfg.traceDiscarded then
       slimTrace s!"{var} := {repr x}"
-    logInfo s!"variable testable: outer prop: {e}, inner prop: {e'}"
+    -- logInfo s!"variable testable: outer prop: {e}, inner prop: {e'}"
     let r ← MetaTestable.runProp (β <| SampleableExt.interp x) cfg false e'
     let ⟨finalX, finalR⟩ ←
       if isFailure r then
@@ -534,7 +536,7 @@ instance varTestable [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x
     let samp ← synthInstance instType
     let xInterp ← mkAppOptM ``SampleableExt.interp #[αExp, samp, xExpr]
     let h := (· <| SampleableExt.interp finalX)
-    logInfo s!"Adding var info from varTestable, goal : {← ppExpr e}"
+    -- logInfo s!"Adding var info from varTestable, goal : {← ppExpr e}"
     let hExpr ← withLocalDeclD `x e fun x => do
       mkLambdaFVars #[x] (mkApp x xInterp)
     addVarInfo var finalX h hExpr finalR
@@ -571,7 +573,7 @@ instance propVarTestable {β : Prop → Prop} [h: ∀ b : Bool, MetaTestable (β
 where
   run := fun cfg min e => do
     let (some βExpr, _) ← forallProp? e | throwError m!"Expected a `Forall` proposition, got {← ppExpr e}"
-    logInfo s!"prop variable testable: outer prop: {e}, inner prop: {βExpr}"
+    -- logInfo s!"prop variable testable: outer prop: {e}, inner prop: {βExpr}"
     let p ←  MetaTestable.runProp (NamedBinder var <| ∀ b : Bool, β b) cfg min e
     let e' ← mkAppM ``bool_to_prop_fmly #[βExpr]
     imp (bool_to_prop_fmly β) e' p
@@ -582,17 +584,17 @@ where
   run := fun cfg min e => do
     if cfg.traceDiscarded || cfg.traceSuccesses then
       slimTrace s!"{var} is unused"
-    logInfo s!"unused variable testable: outer prop: {e}"
+    -- logInfo s!"unused variable testable: outer prop: {e}"
     let (some aExp, some e') ← impProp? e | throwError m!"Expected an `Imp` proposition, got {← ppExpr e}"
     let r ← MetaTestable.runProp β cfg min e'
     let hExp ← mkAppOptM ``id #[e']
     let finalR ←  addInfo s!"{var} is irrelevant (unused)" id hExp r
     let h := (· <| Classical.ofNonempty)
     let nInst ← synthInstance <| ← mkAppM ``Nonempty #[aExp]
-    logInfo "building h expression"
+    -- logInfo "building h expression"
     let hExp ← withLocalDeclD `h e fun h => do
       mkLambdaFVars #[h] <| mkApp h nInst
-    logInfo m!"Calling imp; hExpr of type {← inferType hExp}"
+    -- logInfo m!"Calling imp; hExpr of type {← inferType hExp}"
     imp h hExp finalR  (PSum.inr <| fun x _ => x)
 
 instance (priority := 2000) subtypeVarTestable {p : α → Prop} {β : α → Prop}
@@ -619,11 +621,11 @@ instance (priority := low) decidableTestable {p : Prop} [PrintableProp p] [Decid
       let s := printProp p
       let inst ←  synthInstance <| ← mkAppM ``Decidable #[e]
       let falseRefl ← mkAppM ``Eq.refl #[mkConst ``false]
-      logInfo "Decidable used; building proof"
+      -- logInfo "Decidable used; building proof"
       let pf' ← mkAppOptM ``of_decide_eq_false #[e, inst, falseRefl]
-      logInfo "Decidable proof built"
+      -- logInfo "Decidable proof built"
       checkDisproof pf' e
-      logInfo "Decidable proof checked"
+      -- logInfo "Decidable proof checked"
       return failure h pf' [s!"issue: {s} does not hold"] 0
 
 end MetaTestable
