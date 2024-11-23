@@ -30,8 +30,8 @@ info: fun a => False.elim (of_decide_eq_false (Eq.refl false) a) : 2 < 1 → 1 �
 info:
 ===================
 Found a counter-example!
-n := 6
-issue: 6 < 4 does not hold
+n := 5
+issue: 5 < 4 does not hold
 (0 shrinks)
 -------------------
 ---
@@ -39,7 +39,7 @@ info: Vacuous Implication. Hypothesis ∀ (n : Nat), n < 4 is never satisfied
 ---
 info: fun a =>
   False.elim
-    (mt (fun x => x (Plausible.SampleableExt.interp 6)) (of_decide_eq_false (Eq.refl false))
+    (mt (fun x => x (Plausible.SampleableExt.interp 5)) (of_decide_eq_false (Eq.refl false))
       a) : (∀ (n : Nat), n < 4) → 1 ≤ 3
 -/
 #guard_msgs in
@@ -49,8 +49,8 @@ info: fun a =>
 info:
 ===================
 Found a counter-example!
-n := 6
-issue: 6 < 4 does not hold
+n := 5
+issue: 5 < 4 does not hold
 (0 shrinks)
 -------------------
 ---
@@ -64,8 +64,8 @@ example : (∀ n: Nat, n < (4: Nat)) → 4 ≤ 3 := by vacuous
 info:
 ===================
 Found a counter-example!
-n := 6
-issue: 6 < 4 does not hold
+n := 5
+issue: 5 < 4 does not hold
 (0 shrinks)
 -------------------
 ---
@@ -79,8 +79,8 @@ example (h: ∀ n: Nat, n < (4: Nat)) : 4 ≤ 3 := by vacuous
 info:
 ===================
 Found a counter-example!
-n := 6
-issue: 6 < 4 does not hold
+n := 5
+issue: 5 < 4 does not hold
 (0 shrinks)
 -------------------
 ---

@@ -4,6 +4,7 @@ import Plausible.MetaTestable
 open Plausible Plausible.MetaTestable
 open Lean Meta Elab Term Tactic
 
+-- Testing the pattern matching functions
 open Lean Elab Term in
 elab "#decompose_prop" t:term : command =>
   Command.liftTermElabM  do
@@ -63,23 +64,70 @@ info: Implies: 1 = 0; 2 ≠ 0
 #guard_msgs in
 #decompose_prop 1 = 0 ↔   2 ≠ 0
 
-def eg_fail : MetaTestResult False :=
-  @MetaTestResult.failure False (fun (x: False) ↦ x)
-    (Lean.Expr.lam `x (Lean.Expr.const `False []) (Lean.Expr.bvar 0) (Lean.BinderInfo.default)) [] 0
+-- Elaborater to help with testing
+elab "disprove%" t:term : term => do
+  let tgt ← elabType t
+  let cfg : Configuration := {}
+  let (some code') ← disproveM? cfg tgt | throwError "disprove% failed"
+  logInfo s!"disproof: {← ppExpr code'}; \ntype: {← ppExpr <| (← inferType code')}"
+  return tgt
 
-def disproofExpr {p: Prop} : MetaTestResult p → MetaM Lean.Expr
-  | MetaTestResult.failure _ pfExpr _ _  => do
-    return pfExpr
-  | _ =>
-    throwError "disproofExpr: expected failure"
-
-elab "disproof_expr_eg%" : term => do
-  disproofExpr eg_fail
-
-/-
-fun x => x : False → False
+-- Testing the disproveM? function
+/--
+info:
+===================
+Found a counter-example!
+a := 0
+b := 0
+issue: 0 < 0 does not hold
+(0 shrinks)
+-------------------
+---
+info: disproof: mt (fun x => x (SampleableExt.interp 0)) (mt (fun x => x (SampleableExt.interp 0)) (of_decide_eq_false (Eq.refl false))); ⏎
+type: ¬∀ (a b : Nat), a < b
+---
+info: ∀ (a b : Nat), a < b : Prop
 -/
-#check disproof_expr_eg%
+#guard_msgs in
+#check disprove% ∀ (a b : Nat), a < b
+
+/--
+info:
+===================
+Found a counter-example!
+a := 0
+b := 0
+issue: 0 < 0 does not hold
+issue: 0 < 0 does not hold
+(0 shrinks)
+-------------------
+---
+info: disproof: mt (fun x => x (SampleableExt.interp 0))
+  (mt (fun x => x (SampleableExt.interp 0))
+    (Or.rec (of_decide_eq_false (Eq.refl false)) (of_decide_eq_false (Eq.refl false)))); ⏎
+type: ¬∀ (a b : Nat), a < b ∨ b < a
+---
+info: ∀ (a b : Nat), a < b ∨ b < a : Prop
+-/
+#guard_msgs in
+#check disprove% ∀ (a b : Nat), a < b ∨ b < a
+
+/--
+info:
+===================
+Found a counter-example!
+issue: False does not hold
+(0 shrinks)
+-------------------
+---
+info: disproof: fun h => of_decide_eq_false (Eq.refl false) h.left; ⏎
+type: False ∧ False → False
+---
+info: False ∧ False : Prop
+-/
+#guard_msgs in
+#check disprove% False ∧ False
+
 
 elab "#expr" e:term : command =>
   Command.liftTermElabM  do
@@ -93,26 +141,340 @@ elab "expr%" e:term : term => do
     logInfo s!"{← reduce e}"
     return e
 
-open Decorations Lean Elab Tactic
+-- Testing the MetaTestable class can be inferred
+example : MetaTestable <| (1: Nat) = 0 := inferInstance
 
+example : MetaTestable (NamedBinder "a" (∀ (a : Nat), a ≤ 1)) := inferInstance
 
-#synth MetaTestable <| (1: Nat) = 0
+example : MetaTestable (NamedBinder "a" (∀ (a : Nat), NamedBinder "b" (∀ (b : Nat), a ≤ b))) := inferInstance
 
-#synth MetaTestable (NamedBinder "a" (∀ (a : Nat), a ≤ 1))
-
-#synth MetaTestable (NamedBinder "a" (∀ (a : Nat), NamedBinder "b" (∀ (b : Nat), a ≤ b)))
-
-set_option pp.universes true in
+-- Main tests: finding counter-examples
+/--
+info:
+===================
+Found a counter-example!
+_a is irrelevant (unused)
+issue: False does not hold
+(0 shrinks)
+-------------------
+---
+info: some (Lean.Expr.app
+  (Lean.Expr.app
+    (Lean.Expr.app
+      (Lean.Expr.app
+        (Lean.Expr.const `mt [])
+        (Lean.Expr.forallE `a (Lean.Expr.const `Nat []) (Lean.Expr.const `False []) (Lean.BinderInfo.default)))
+      (Lean.Expr.const `False []))
+    (Lean.Expr.lam
+      `h
+      (Lean.Expr.forallE `a (Lean.Expr.const `Nat []) (Lean.Expr.const `False []) (Lean.BinderInfo.default))
+      (Lean.Expr.app
+        (Lean.Expr.bvar 0)
+        (Lean.Expr.app
+          (Lean.Expr.app
+            (Lean.Expr.const `instNonemptyOfInhabited [Lean.Level.succ (Lean.Level.zero)])
+            (Lean.Expr.const `Nat []))
+          (Lean.Expr.const `instInhabitedNat [])))
+      (Lean.BinderInfo.default)))
+  (Lean.Expr.app
+    (Lean.Expr.app
+      (Lean.Expr.app (Lean.Expr.app (Lean.Expr.const `mt []) (Lean.Expr.const `False [])) (Lean.Expr.const `False []))
+      (Lean.Expr.app (Lean.Expr.const `id [Lean.Level.zero]) (Lean.Expr.const `False [])))
+    (Lean.Expr.app
+      (Lean.Expr.app
+        (Lean.Expr.app (Lean.Expr.const `of_decide_eq_false []) (Lean.Expr.const `False []))
+        (Lean.Expr.const `instDecidableFalse []))
+      (Lean.Expr.app
+        (Lean.Expr.app (Lean.Expr.const `Eq.refl [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Bool []))
+        (Lean.Expr.const `Bool.false [])))))
+-/
+#guard_msgs in
 #eval MetaTestable.check (∀ (_a : Nat), False) (propExpr := Lean.Expr.forallE `a (Lean.Expr.const `Nat []) (Lean.Expr.const `False []) (Lean.BinderInfo.default))
 
-/-
-AppBuilder for 'mkAppM', result contains metavariables
-  SampleableExt Nat
+
+/--
+info:
+===================
+Found a counter-example!
+a := 1
+issue: 1 < 1 does not hold
+(0 shrinks)
+-------------------
+---
+info: some (Lean.Expr.app
+  (Lean.Expr.app
+    (Lean.Expr.app
+      (Lean.Expr.app
+        (Lean.Expr.const `mt [])
+        (Lean.Expr.forallE `a (Lean.Expr.const `Nat []) (Lean.Expr.const `False []) (Lean.BinderInfo.default)))
+      (Lean.Expr.const `False []))
+    (Lean.Expr.lam
+      `x
+      (Lean.Expr.forallE `a (Lean.Expr.const `Nat []) (Lean.Expr.const `False []) (Lean.BinderInfo.default))
+      (Lean.Expr.app
+        (Lean.Expr.bvar 0)
+        (Lean.Expr.app
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.const `Plausible.SampleableExt.interp [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+              (Lean.Expr.const `Nat []))
+            (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+              (Lean.Expr.lit (Lean.Literal.natVal 1)))
+            (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 1))))))
+      (Lean.BinderInfo.default)))
+  (Lean.Expr.app
+    (Lean.Expr.app
+      (Lean.Expr.app (Lean.Expr.const `of_decide_eq_false []) (Lean.Expr.const `False []))
+      (Lean.Expr.const `instDecidableFalse []))
+    (Lean.Expr.app
+      (Lean.Expr.app (Lean.Expr.const `Eq.refl [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Bool []))
+      (Lean.Expr.const `Bool.false []))))
 -/
-set_option pp.universes true in
+#guard_msgs in
 #eval MetaTestable.check (∀ (a : Nat), a < 1) (propExpr := Lean.Expr.forallE `a (Lean.Expr.const `Nat []) (Lean.Expr.const `False []) (Lean.BinderInfo.default))
 
-
+/--
+info:
+===================
+Found a counter-example!
+a := 0
+b := 0
+issue: 0 < 0 does not hold
+(0 shrinks)
+-------------------
+---
+info: some (Lean.Expr.app
+  (Lean.Expr.app
+    (Lean.Expr.app
+      (Lean.Expr.app
+        (Lean.Expr.const `mt [])
+        (Lean.Expr.forallE
+          `a
+          (Lean.Expr.const `Nat [])
+          (Lean.Expr.forallE
+            `b
+            (Lean.Expr.const `Nat [])
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app (Lean.Expr.const `LT.lt [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Nat []))
+                  (Lean.Expr.const `instLTNat []))
+                (Lean.Expr.bvar 1))
+              (Lean.Expr.bvar 0))
+            (Lean.BinderInfo.default))
+          (Lean.BinderInfo.default)))
+      (Lean.Expr.forallE
+        `b
+        (Lean.Expr.const `Nat [])
+        (Lean.Expr.app
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.app (Lean.Expr.const `LT.lt [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Nat []))
+              (Lean.Expr.const `instLTNat []))
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.const `Plausible.SampleableExt.interp [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+                  (Lean.Expr.const `Nat []))
+                (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                  (Lean.Expr.lit (Lean.Literal.natVal 0)))
+                (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+          (Lean.Expr.bvar 0))
+        (Lean.BinderInfo.default)))
+    (Lean.Expr.lam
+      `x
+      (Lean.Expr.forallE
+        `a
+        (Lean.Expr.const `Nat [])
+        (Lean.Expr.forallE
+          `b
+          (Lean.Expr.const `Nat [])
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app (Lean.Expr.const `LT.lt [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Nat []))
+                (Lean.Expr.const `instLTNat []))
+              (Lean.Expr.bvar 1))
+            (Lean.Expr.bvar 0))
+          (Lean.BinderInfo.default))
+        (Lean.BinderInfo.default))
+      (Lean.Expr.app
+        (Lean.Expr.bvar 0)
+        (Lean.Expr.app
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.const `Plausible.SampleableExt.interp [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+              (Lean.Expr.const `Nat []))
+            (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+              (Lean.Expr.lit (Lean.Literal.natVal 0)))
+            (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+      (Lean.BinderInfo.default)))
+  (Lean.Expr.app
+    (Lean.Expr.app
+      (Lean.Expr.app
+        (Lean.Expr.app
+          (Lean.Expr.const `mt [])
+          (Lean.Expr.forallE
+            `b
+            (Lean.Expr.const `Nat [])
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app (Lean.Expr.const `LT.lt [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Nat []))
+                  (Lean.Expr.const `instLTNat []))
+                (Lean.Expr.app
+                  (Lean.Expr.app
+                    (Lean.Expr.app
+                      (Lean.Expr.const
+                        `Plausible.SampleableExt.interp
+                        [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+                      (Lean.Expr.const `Nat []))
+                    (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+                  (Lean.Expr.app
+                    (Lean.Expr.app
+                      (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                      (Lean.Expr.lit (Lean.Literal.natVal 0)))
+                    (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+              (Lean.Expr.bvar 0))
+            (Lean.BinderInfo.default)))
+        (Lean.Expr.app
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.app (Lean.Expr.const `LT.lt [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Nat []))
+              (Lean.Expr.const `instLTNat []))
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.const `Plausible.SampleableExt.interp [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+                  (Lean.Expr.const `Nat []))
+                (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                  (Lean.Expr.lit (Lean.Literal.natVal 0)))
+                (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.const `Plausible.SampleableExt.interp [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+                (Lean.Expr.const `Nat []))
+              (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                (Lean.Expr.lit (Lean.Literal.natVal 0)))
+              (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0)))))))
+      (Lean.Expr.lam
+        `x
+        (Lean.Expr.forallE
+          `b
+          (Lean.Expr.const `Nat [])
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app (Lean.Expr.const `LT.lt [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Nat []))
+                (Lean.Expr.const `instLTNat []))
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app
+                    (Lean.Expr.const
+                      `Plausible.SampleableExt.interp
+                      [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+                    (Lean.Expr.const `Nat []))
+                  (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+                (Lean.Expr.app
+                  (Lean.Expr.app
+                    (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                    (Lean.Expr.lit (Lean.Literal.natVal 0)))
+                  (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+            (Lean.Expr.bvar 0))
+          (Lean.BinderInfo.default))
+        (Lean.Expr.app
+          (Lean.Expr.bvar 0)
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.const `Plausible.SampleableExt.interp [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+                (Lean.Expr.const `Nat []))
+              (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                (Lean.Expr.lit (Lean.Literal.natVal 0)))
+              (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+        (Lean.BinderInfo.default)))
+    (Lean.Expr.app
+      (Lean.Expr.app
+        (Lean.Expr.app
+          (Lean.Expr.const `of_decide_eq_false [])
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app (Lean.Expr.const `LT.lt [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Nat []))
+                (Lean.Expr.const `instLTNat []))
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app
+                    (Lean.Expr.const
+                      `Plausible.SampleableExt.interp
+                      [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+                    (Lean.Expr.const `Nat []))
+                  (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+                (Lean.Expr.app
+                  (Lean.Expr.app
+                    (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                    (Lean.Expr.lit (Lean.Literal.natVal 0)))
+                  (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.const `Plausible.SampleableExt.interp [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+                  (Lean.Expr.const `Nat []))
+                (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                  (Lean.Expr.lit (Lean.Literal.natVal 0)))
+                (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0)))))))
+        (Lean.Expr.app
+          (Lean.Expr.app
+            (Lean.Expr.const `Nat.decLt [])
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.const `Plausible.SampleableExt.interp [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+                  (Lean.Expr.const `Nat []))
+                (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                  (Lean.Expr.lit (Lean.Literal.natVal 0)))
+                (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.const `Plausible.SampleableExt.interp [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+                (Lean.Expr.const `Nat []))
+              (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                (Lean.Expr.lit (Lean.Literal.natVal 0)))
+              (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0)))))))
+      (Lean.Expr.app
+        (Lean.Expr.app (Lean.Expr.const `Eq.refl [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Bool []))
+        (Lean.Expr.const `Bool.false [])))))
+-/
+#guard_msgs in
 #eval MetaTestable.check (∀ (a b : Nat), a < b) (propExpr := (Lean.Expr.forallE
   `a
   (Lean.Expr.const `Nat [])
@@ -131,8 +493,308 @@ set_option pp.universes true in
     (Lean.BinderInfo.default))
   (Lean.BinderInfo.default)))
 
-set_option linter.unusedVariables false in
-#eval MetaTestable.check (∀ (a b : Nat), a < 0) (propExpr := (Lean.Expr.forallE
+/--
+info:
+===================
+Found a counter-example!
+a := 0
+_b is irrelevant (unused)
+issue: 0 < 0 does not hold
+(0 shrinks)
+-------------------
+---
+info: some (Lean.Expr.app
+  (Lean.Expr.app
+    (Lean.Expr.app
+      (Lean.Expr.app
+        (Lean.Expr.const `mt [])
+        (Lean.Expr.forallE
+          `a
+          (Lean.Expr.const `Nat [])
+          (Lean.Expr.forallE
+            `b
+            (Lean.Expr.const `Nat [])
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app (Lean.Expr.const `LT.lt [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Nat []))
+                  (Lean.Expr.const `instLTNat []))
+                (Lean.Expr.bvar 1))
+              (Lean.Expr.lit (Lean.Literal.natVal 0)))
+            (Lean.BinderInfo.default))
+          (Lean.BinderInfo.default)))
+      (Lean.Expr.forallE
+        `b
+        (Lean.Expr.const `Nat [])
+        (Lean.Expr.app
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.app (Lean.Expr.const `LT.lt [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Nat []))
+              (Lean.Expr.const `instLTNat []))
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.const `Plausible.SampleableExt.interp [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+                  (Lean.Expr.const `Nat []))
+                (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                  (Lean.Expr.lit (Lean.Literal.natVal 0)))
+                (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+          (Lean.Expr.lit (Lean.Literal.natVal 0)))
+        (Lean.BinderInfo.default)))
+    (Lean.Expr.lam
+      `x
+      (Lean.Expr.forallE
+        `a
+        (Lean.Expr.const `Nat [])
+        (Lean.Expr.forallE
+          `b
+          (Lean.Expr.const `Nat [])
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app (Lean.Expr.const `LT.lt [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Nat []))
+                (Lean.Expr.const `instLTNat []))
+              (Lean.Expr.bvar 1))
+            (Lean.Expr.lit (Lean.Literal.natVal 0)))
+          (Lean.BinderInfo.default))
+        (Lean.BinderInfo.default))
+      (Lean.Expr.app
+        (Lean.Expr.bvar 0)
+        (Lean.Expr.app
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.const `Plausible.SampleableExt.interp [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+              (Lean.Expr.const `Nat []))
+            (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+              (Lean.Expr.lit (Lean.Literal.natVal 0)))
+            (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+      (Lean.BinderInfo.default)))
+  (Lean.Expr.app
+    (Lean.Expr.app
+      (Lean.Expr.app
+        (Lean.Expr.app
+          (Lean.Expr.const `mt [])
+          (Lean.Expr.forallE
+            `b
+            (Lean.Expr.const `Nat [])
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app (Lean.Expr.const `LT.lt [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Nat []))
+                  (Lean.Expr.const `instLTNat []))
+                (Lean.Expr.app
+                  (Lean.Expr.app
+                    (Lean.Expr.app
+                      (Lean.Expr.const
+                        `Plausible.SampleableExt.interp
+                        [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+                      (Lean.Expr.const `Nat []))
+                    (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+                  (Lean.Expr.app
+                    (Lean.Expr.app
+                      (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                      (Lean.Expr.lit (Lean.Literal.natVal 0)))
+                    (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                  (Lean.Expr.lit (Lean.Literal.natVal 0)))
+                (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0)))))
+            (Lean.BinderInfo.default)))
+        (Lean.Expr.app
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.app (Lean.Expr.const `LT.lt [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Nat []))
+              (Lean.Expr.const `instLTNat []))
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.const `Plausible.SampleableExt.interp [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+                  (Lean.Expr.const `Nat []))
+                (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                  (Lean.Expr.lit (Lean.Literal.natVal 0)))
+                (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+              (Lean.Expr.lit (Lean.Literal.natVal 0)))
+            (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+      (Lean.Expr.lam
+        `h
+        (Lean.Expr.forallE
+          `b
+          (Lean.Expr.const `Nat [])
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app (Lean.Expr.const `LT.lt [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Nat []))
+                (Lean.Expr.const `instLTNat []))
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app
+                    (Lean.Expr.const
+                      `Plausible.SampleableExt.interp
+                      [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+                    (Lean.Expr.const `Nat []))
+                  (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+                (Lean.Expr.app
+                  (Lean.Expr.app
+                    (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                    (Lean.Expr.lit (Lean.Literal.natVal 0)))
+                  (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                (Lean.Expr.lit (Lean.Literal.natVal 0)))
+              (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0)))))
+          (Lean.BinderInfo.default))
+        (Lean.Expr.app
+          (Lean.Expr.bvar 0)
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.const `instNonemptyOfInhabited [Lean.Level.succ (Lean.Level.zero)])
+              (Lean.Expr.const `Nat []))
+            (Lean.Expr.const `instInhabitedNat [])))
+        (Lean.BinderInfo.default)))
+    (Lean.Expr.app
+      (Lean.Expr.app
+        (Lean.Expr.app
+          (Lean.Expr.app
+            (Lean.Expr.const `mt [])
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app (Lean.Expr.const `LT.lt [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Nat []))
+                  (Lean.Expr.const `instLTNat []))
+                (Lean.Expr.app
+                  (Lean.Expr.app
+                    (Lean.Expr.app
+                      (Lean.Expr.const
+                        `Plausible.SampleableExt.interp
+                        [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+                      (Lean.Expr.const `Nat []))
+                    (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+                  (Lean.Expr.app
+                    (Lean.Expr.app
+                      (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                      (Lean.Expr.lit (Lean.Literal.natVal 0)))
+                    (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                  (Lean.Expr.lit (Lean.Literal.natVal 0)))
+                (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app (Lean.Expr.const `LT.lt [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Nat []))
+                (Lean.Expr.const `instLTNat []))
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app
+                    (Lean.Expr.const
+                      `Plausible.SampleableExt.interp
+                      [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+                    (Lean.Expr.const `Nat []))
+                  (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+                (Lean.Expr.app
+                  (Lean.Expr.app
+                    (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                    (Lean.Expr.lit (Lean.Literal.natVal 0)))
+                  (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                (Lean.Expr.lit (Lean.Literal.natVal 0)))
+              (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+        (Lean.Expr.app
+          (Lean.Expr.const `id [Lean.Level.zero])
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app (Lean.Expr.const `LT.lt [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Nat []))
+                (Lean.Expr.const `instLTNat []))
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app
+                    (Lean.Expr.const
+                      `Plausible.SampleableExt.interp
+                      [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+                    (Lean.Expr.const `Nat []))
+                  (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+                (Lean.Expr.app
+                  (Lean.Expr.app
+                    (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                    (Lean.Expr.lit (Lean.Literal.natVal 0)))
+                  (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                (Lean.Expr.lit (Lean.Literal.natVal 0)))
+              (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0)))))))
+      (Lean.Expr.app
+        (Lean.Expr.app
+          (Lean.Expr.app
+            (Lean.Expr.const `of_decide_eq_false [])
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app (Lean.Expr.const `LT.lt [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Nat []))
+                  (Lean.Expr.const `instLTNat []))
+                (Lean.Expr.app
+                  (Lean.Expr.app
+                    (Lean.Expr.app
+                      (Lean.Expr.const
+                        `Plausible.SampleableExt.interp
+                        [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+                      (Lean.Expr.const `Nat []))
+                    (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+                  (Lean.Expr.app
+                    (Lean.Expr.app
+                      (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                      (Lean.Expr.lit (Lean.Literal.natVal 0)))
+                    (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                  (Lean.Expr.lit (Lean.Literal.natVal 0)))
+                (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+          (Lean.Expr.app
+            (Lean.Expr.app
+              (Lean.Expr.const `Nat.decLt [])
+              (Lean.Expr.app
+                (Lean.Expr.app
+                  (Lean.Expr.app
+                    (Lean.Expr.const
+                      `Plausible.SampleableExt.interp
+                      [Lean.Level.succ (Lean.Level.zero), Lean.Level.zero])
+                    (Lean.Expr.const `Nat []))
+                  (Lean.Expr.const `Plausible.Nat.sampleableExt []))
+                (Lean.Expr.app
+                  (Lean.Expr.app
+                    (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                    (Lean.Expr.lit (Lean.Literal.natVal 0)))
+                  (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+            (Lean.Expr.app
+              (Lean.Expr.app
+                (Lean.Expr.app (Lean.Expr.const `OfNat.ofNat [Lean.Level.zero]) (Lean.Expr.const `Nat []))
+                (Lean.Expr.lit (Lean.Literal.natVal 0)))
+              (Lean.Expr.app (Lean.Expr.const `instOfNatNat []) (Lean.Expr.lit (Lean.Literal.natVal 0))))))
+        (Lean.Expr.app
+          (Lean.Expr.app (Lean.Expr.const `Eq.refl [Lean.Level.succ (Lean.Level.zero)]) (Lean.Expr.const `Bool []))
+          (Lean.Expr.const `Bool.false []))))))
+-/
+#guard_msgs in
+#eval MetaTestable.check (∀ (a _b : Nat), a < 0) (propExpr := (Lean.Expr.forallE
   `a
   (Lean.Expr.const `Nat [])
   (Lean.Expr.forallE
@@ -149,24 +811,3 @@ set_option linter.unusedVariables false in
       (Lean.Expr.lit (Lean.Literal.natVal 0)))
     (Lean.BinderInfo.default))
   (Lean.BinderInfo.default)))
-
-#expr ∀ (a b : Nat), a < b
-#expr ∀ (a _b : Nat), a < 0
-
-#check Lean.Expr.lit (Lean.Literal.natVal 0)
-
-#expr Expr → MetaM (Option Expr)
-
-
-elab "disprove%" t:term : term => do
-  let tgt ← elabType t
-  let cfg : Configuration := {}
-  let (some code') ← disproveM? cfg tgt | throwError "disprove% failed"
-  logInfo s!"disproof: {← ppExpr code'}; \ntype: {← ppExpr <| (← inferType code')}"
-  return tgt
-
-#check disprove% ∀ (a b : Nat), a < b
-
-#check disprove% ∀ (a b : Nat), a < b ∨ b < a
-
-#check disprove% False ∧ False
