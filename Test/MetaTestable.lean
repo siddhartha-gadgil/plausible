@@ -63,9 +63,6 @@ info: Implies: 1 = 0; 2 ≠ 0
 #guard_msgs in
 #decompose_prop 1 = 0 ↔   2 ≠ 0
 
-#check MetaTestResult.failure
-
-
 def eg_fail : MetaTestResult False :=
   @MetaTestResult.failure False (fun (x: False) ↦ x)
     (Lean.Expr.lam `x (Lean.Expr.const `False []) (Lean.Expr.bvar 0) (Lean.BinderInfo.default)) [] 0
@@ -95,46 +92,11 @@ elab "expr%" e:term : term => do
     logInfo s!"{repr e}"
     logInfo s!"{← reduce e}"
     return e
---
-
-structure MyType where
-  x : Nat
-  y : Nat
-  h : x ≤ y
-  deriving Repr
-
-#check fun (x y : Nat) (h : x ≤ y) =>  expr% (MyType.mk x y h)
-
-instance : Shrinkable MyType where
-  shrink := fun ⟨x, y, _⟩ =>
-    let proxy := Shrinkable.shrink (x, y - x)
-    proxy.map (fun (fst, snd) => ⟨fst, fst + snd, by omega⟩)
-
-instance : SampleableExt MyType :=
-  SampleableExt.mkSelfContained do
-    let x ← SampleableExt.interpSample Nat
-    let xyDiff ← SampleableExt.interpSample Nat
-    return ⟨x, x + xyDiff, by omega⟩
-
-set_option diagnostics true in
--- #eval MetaTestable.check <| ∀ a b : MyType, a.y ≤ b.x → a.x ≤ b.y
 
 open Decorations Lean Elab Tactic
 
-elab "mk_decorations" : tactic => do
-  let goal ← getMainGoal
-  let goalType ← goal.getType
-  if let .app (.const ``Decorations.DecorationsOf _) body := goalType then
-    closeMainGoal `mk_decorations (← Decorations.addDecorations body)
-
-
-def de : Decorations.DecorationsOf (∀ a b : Nat, a ≤ b) := by mk_decorations
-
-#print de
 
 #synth MetaTestable <| (1: Nat) = 0
-
-#synth Testable (NamedBinder "a" (∀ (a : Nat), a ≤ 1))
 
 #synth MetaTestable (NamedBinder "a" (∀ (a : Nat), a ≤ 1))
 
@@ -208,16 +170,3 @@ elab "disprove%" t:term : term => do
 #check disprove% ∀ (a b : Nat), a < b ∨ b < a
 
 #check disprove% False ∧ False
-
-def eg {p: Prop}(h : ¬¬p) : p :=
-  by
-  by_cases h':p
-  · exact h'
-  · exfalso
-    contradiction
-
-/-
-def eg : ∀ {p : Prop}, ¬¬p → p :=
-fun {p} h => if h' : p then h' else False.elim (absurd h' h)
--/
-#print eg
