@@ -141,7 +141,7 @@ def de : Decorations.DecorationsOf (∀ a b : Nat, a ≤ b) := by mk_decorations
 #synth MetaTestable (NamedBinder "a" (∀ (a : Nat), NamedBinder "b" (∀ (b : Nat), a ≤ b)))
 
 set_option pp.universes true in
-#eval MetaTestable.check (∀ (a : Nat), False) (propExpr := Lean.Expr.forallE `a (Lean.Expr.const `Nat []) (Lean.Expr.const `False []) (Lean.BinderInfo.default))
+#eval MetaTestable.check (∀ (_a : Nat), False) (propExpr := Lean.Expr.forallE `a (Lean.Expr.const `Nat []) (Lean.Expr.const `False []) (Lean.BinderInfo.default))
 
 /-
 AppBuilder for 'mkAppM', result contains metavariables
@@ -189,7 +189,7 @@ set_option linter.unusedVariables false in
   (Lean.BinderInfo.default)))
 
 #expr ∀ (a b : Nat), a < b
-#expr ∀ (a b : Nat), a < 0
+#expr ∀ (a _b : Nat), a < 0
 
 #check Lean.Expr.lit (Lean.Literal.natVal 0)
 
@@ -208,3 +208,16 @@ elab "disprove%" t:term : term => do
 #check disprove% ∀ (a b : Nat), a < b ∨ b < a
 
 #check disprove% False ∧ False
+
+def eg {p: Prop}(h : ¬¬p) : p :=
+  by
+  by_cases h':p
+  · exact h'
+  · exfalso
+    contradiction
+
+/-
+def eg : ∀ {p : Prop}, ¬¬p → p :=
+fun {p} h => if h' : p then h' else False.elim (absurd h' h)
+-/
+#print eg
