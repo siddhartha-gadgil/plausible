@@ -1,6 +1,11 @@
 import Lean
 import Plausible
 import Plausible.MetaTestable
+/-!
+## Vacuous Implication
+
+The `vacuous` tactic is used to prove vacuous implications. We use the plausible search for counterexamples (actually at the `MetaTestable` level) to find a counterexample to the hypothesis. If a counterexample is found, we can prove the vacuous implication by showing that the hypothesis is never satisfied.
+-/
 
 open Lean Meta Elab Tactic Plausible
 

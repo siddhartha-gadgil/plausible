@@ -1,10 +1,13 @@
 import Plausible.MetaTestable
+/-!
+## Random Search
+
+The `random_search` tactic tries to prove a result by searching for a counter-example to its negation using `MetaTestable`. If a counter-example is found, we can prove the result by showing that the negation is false.
+-/
+
 open Lean Meta Elab Term
 
 namespace Plausible
-
-#check Decidable.not_not
-#check Classical.choice
 
 open Classical in
 theorem not_not (p: Prop) : ¬ ¬ p → p :=
@@ -39,13 +42,6 @@ theorem not_forall {p : α → Prop} : ¬ (∀ x, p x) →  ∃ x, ¬ p x := by
       exact contra ⟨x, h'⟩
   contradiction
 
-
-#print not_not
-#check not_and_of_not_or_not
-#check not_or
-#check not_exists_of_forall_not
-#check not_forall_of_exists_not
-#check Iff.mp
 
 partial def negate (e: Expr) : MetaM <| Expr × Expr := do
   match ← notProp? e with
@@ -107,16 +103,6 @@ elab "neg_neg" t:term : term => do
   logInfo m!"check: {check}"
   return negProp
 
-#check neg_neg (1 = 4)
-
-#check neg_neg ¬(1 = 4)
-
-#check neg_neg ¬(1 = 4) ∧ (2 < 4)
-
-#check neg_neg (1 = 4) ∨ (¬ (2 < 4))
-
-#check neg_neg ∃ x : Nat, x > 0
-
 open Lean.Parser.Tactic Tactic
 syntax (name := searchSyntax) "random_search" (config)? : tactic
 elab_rules : tactic | `(tactic| random_search $[$cfg]?) => withMainContext do
@@ -137,11 +123,5 @@ elab_rules : tactic | `(tactic| random_search $[$cfg]?) => withMainContext do
     g.assign pf'
   | none =>
     throwError "could not find a proof by negated counter-example"
-
-example : ¬ (1 = 4) := by
-  random_search
-
-example : ∃ n : Nat, n > 0 ∧ n < 4 := by
-  random_search
 
 end Plausible

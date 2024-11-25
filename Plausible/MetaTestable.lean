@@ -12,30 +12,14 @@ open Lean
 /-!
 # `MetaTestable` Class
 
-MetaTestable propositions have a procedure that can generate counter-examples
-together with a proof that they invalidate the proposition.
+MetaTestable propositions have a procedure that can generate counter-examples together with a proof that they invalidate the proposition. This is a refinement of the `Testable` class.
 
-This is a port of the Haskell QuickCheck library.
-
-## Creating Customized Instances
-
-The type classes `MetaTestable`, `SampleableExt` and `Shrinkable` are the
-means by which `Plausible` creates samples and tests them. For instance,
-the proposition `∀ i j : Nat, i ≤ j` has a `MetaTestable` instance because `Nat`
-is sampleable and `i ≤ j` is decidable. Once `Plausible` finds the `MetaTestable`
-instance, it can start using the instance to repeatedly creating samples
-and checking whether they satisfy the property. Once it has found a
-counter-example it will then use a `Shrinkable` instance to reduce the
-example. This allows the user to create new instances and apply
-`Plausible` to new situations.
-
+Instances of `Testable` are built using `Sampleable` instances. For `MetaTestable` instances, we also need an expression for the proxy in a sampleable type, which is an additional requirement.
 
 ## Main definitions
 
 * `MetaTestable` class
-* `MetaTestable.check`: a way to test a proposition using random examples
-
-
+* `MetaTestable.check`: a way to test a proposition using random examples, givng a proof of the counter-example
 -/
 
 namespace Plausible
@@ -116,7 +100,6 @@ def forallPropProp? (e: Expr) : MetaM (Option Expr × Option Expr × Option Expr
     return (← Lean.getExprMVarAssignment? p.mvarId!, ← Lean.getExprMVarAssignment? fmly.mvarId!, ← Lean.getExprMVarAssignment? α.mvarId!)
   else
     return (none, none, none)
-
 
 def impProp? (e: Expr) : MetaM (Option Expr × Option Expr) := do
   let u ← mkFreshLevelMVar
@@ -522,7 +505,7 @@ instance varTestable [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x
     addVarInfo var finalX h hExpr finalR
 
 
-
+-- Typeclass inference does not seem to work across `mkSelfContained`, so we need to provide instances for the basic types
 instance : ProxyExpr Bool := (inferInstance : ToExpr Bool)
 instance : ProxyExpr String := (inferInstance : ToExpr String)
 instance : ProxyExpr Nat := (inferInstance : ToExpr Nat)
@@ -575,6 +558,7 @@ where
 
 theorem prop_iff_subtype (p : α → Prop) (β : α → Prop) : NamedBinder var (∀ (x : α), NamedBinder var' (p x → β x)) ↔ ∀ (x : Subtype p), β x.val := by simp [Subtype.forall, NamedBinder]
 
+-- This is unlikely to ever be used successfully because of the instance of `SampleableExt (Subtype p)` needed. Should probably have classes for implications instead.
 instance (priority := 2000) subtypeVarTestable {p : α → Prop} {β : α → Prop}
     [∀ x, PrintableProp (p x)]
     [∀ x, MetaTestable (β x)][ToExpr α]
