@@ -77,6 +77,15 @@ def andProp? (e: Expr) : MetaM (Option Expr × Option Expr) := do
   else
     return (none, none)
 
+def notProp? (e: Expr) : MetaM (Option Expr) := do
+  let prop := mkSort levelZero
+  let α ← mkFreshExprMVar prop
+  let e' ← mkAppM ``Not #[α]
+  if ← isDefEq e' e then
+    return (← Lean.getExprMVarAssignment? α.mvarId!)
+  else
+    return none
+
 def forallProp? (e: Expr) : MetaM (Option Expr × Option Expr) := do
   let u ← mkFreshLevelMVar
   let α ← mkFreshExprMVar (mkSort u)
@@ -696,17 +705,7 @@ def disproveM? (cfg : Configuration) (tgt: Expr) : MetaM <| Option Expr := do
   let code ← unsafe evalExpr (Expr → MetaM (Option Expr)) expectedType e
   code tgt
 
+-- Negate
 
--- #eval MetaTestable.check (∀ (x y z a : Nat) (h1 : 3 < x) (h2 : 3 < y), x - y = y - x)
---   Configuration.verbose
--- #eval MetaTestable.check (∀ x : Nat, ∀ y : Nat, x + y = y + x) Configuration.verbose
--- #eval MetaTestable.check (∀ (x : (Nat × Nat)), x.fst - x.snd - 10 = x.snd - x.fst - 10)
---   Configuration.verbose
--- #eval MetaTestable.check (∀ (x : Nat) (h : 10 < x), 5 < x) Configuration.verbose
-
-macro tk:"#test " e:term : command => `(command| #eval%$tk MetaTestable.check $e)
-
--- #test ∀ (x : Nat) (h : 5 < x), 10 < x
--- #test ∀ (x : Nat) (h : 10 < x), 5 < x
 
 end Plausible
