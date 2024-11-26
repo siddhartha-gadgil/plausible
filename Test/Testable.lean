@@ -19,7 +19,7 @@ instance : Shrinkable MyType where
     proxy.map (fun (fst, snd) => ⟨fst, fst + snd, by omega⟩)
 
 instance : SampleableExt MyType :=
-  SampleableExt.mkSelfContained do
+  SampleableExt.mkSelfContainedSimple do
     let x ← SampleableExt.interpSample Nat
     let xyDiff ← SampleableExt.interpSample Nat
     return ⟨x, x + xyDiff, by omega⟩

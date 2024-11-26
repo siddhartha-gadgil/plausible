@@ -334,8 +334,6 @@ namespace MetaTestable
 
 open MetaTestResult
 
-abbrev ProxyExpr α [SampleableExt α] := ToExpr (SampleableExt.proxy α)
-
 
 def runPropExpr (p : Prop) [MetaTestable p] : Configuration → Bool → Option Expr → MGen (MetaTestResult p) := fun cfg b e => do
   runExpr cfg b e
@@ -457,14 +455,14 @@ candidate that falsifies a property and recursively shrinking that one.
 The process is guaranteed to terminate because `shrink x` produces
 a proof that all the values it produces are smaller (according to `SizeOf`)
 than `x`. -/
-partial def minimizeAux [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x, MetaTestable (β x)] (αExp? βExp?: Option Expr) (cfg : Configuration)
+partial def minimizeAux [SampleableExt α]  {β : α → Prop} [∀ x, MetaTestable (β x)] (αExp? βExp?: Option Expr) (cfg : Configuration)
     (var : String) (x : SampleableExt.proxy α) (n : Nat) :
     OptionT MGen (Σ x, MetaTestResult (β (SampleableExt.interp x))) := do
   let candidates := SampleableExt.shrink.shrink x
   if cfg.traceShrinkCandidates then
     slimTrace s!"Candidates for {var} := {repr x}:\n  {repr candidates}"
-  match αExp?, βExp? with
-  | some αExp, some βExpr =>
+  match αExp?, βExp?, getProxyExpr? α  with
+  | some αExp, some βExpr, some _ =>
     for candidate in candidates do
       if cfg.traceShrinkCandidates then
         slimTrace s!"Trying {var} := {repr candidate}"
@@ -482,7 +480,7 @@ partial def minimizeAux [SampleableExt α] [ProxyExpr α] {β : α → Prop} [�
         let currentStep := OptionT.lift <| return Sigma.mk candidate (addShrinks (n + 1) res)
         let nextStep := minimizeAux αExp βExpr cfg var candidate (n + 1)
         return ← (nextStep <|> currentStep)
-  | _, _ =>
+  | _, _, _ =>
     for candidate in candidates do
       if cfg.traceShrinkCandidates then
         slimTrace s!"Trying {var} := {repr candidate}"
@@ -499,7 +497,7 @@ partial def minimizeAux [SampleableExt α] [ProxyExpr α] {β : α → Prop} [�
 
 /-- Once a property fails to hold on an example, look for smaller counter-examples
 to show the user. -/
-def minimize [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x, MetaTestable (β x)] (αExp βExpr: Option Expr)(cfg : Configuration)
+def minimize [SampleableExt α]  {β : α → Prop} [∀ x, MetaTestable (β x)] (αExp βExpr: Option Expr)(cfg : Configuration)
     (var : String) (x : SampleableExt.proxy α) (r : MetaTestResult (β <| SampleableExt.interp x)) :
     MGen (Σ x, MetaTestResult (β <| SampleableExt.interp x)) := do
   if cfg.traceShrink then
@@ -511,7 +509,7 @@ def minimize [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x, MetaTe
 open Lean Meta Elab Term Tactic in
 /-- Test a universal property by creating a sample of the right type and instantiating the
 bound variable with it. -/
-instance varTestable [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x, MetaTestable (β x)] :
+instance varTestable [SampleableExt α] {β : α → Prop} [∀ x, MetaTestable (β x)] :
     MetaTestable (NamedBinder var <| ∀ x : α, β x) where
   runExpr := fun cfg min e? => do
   match e? with
@@ -530,25 +528,27 @@ instance varTestable [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x
           pure ⟨x, r⟩
       else
         pure ⟨x, r⟩
-    let xExpr := toExpr finalX
     let h := (· <| SampleableExt.interp finalX)
     addVarInfo var finalX h none finalR
-
   | some e =>
     let  (some βExp, some αExp) ← forallProp? e | throwError m!"Expected a `Forall` proposition, got {← ppExpr e}"
     let x ← SampleableExt.sample
-    let xExpr := toExpr x
-    let αExp ← instantiateMVars αExp
-    let .sort u := ← inferType αExp | throwError m!"Expected a sort, got {αExp}"
-    let v ←  mkFreshLevelMVar
-    let instType :=  mkApp (mkConst ``SampleableExt [u, v]) αExp
-    let samp ← synthInstance instType
-    let xInterp ← mkAppOptM ``SampleableExt.interp #[αExp, samp, xExpr]
-    let e' ← mkAppM' βExp #[xInterp]
-    let (e', _) ← dsimp e' {}
+    let e'? ← match getProxyExpr? α with
+    | none => pure none
+    | some inst =>
+      let xExpr := toExpr x
+      let αExp ← instantiateMVars αExp
+      let .sort u := ← inferType αExp | throwError m!"Expected a sort, got {αExp}"
+      let v ←  mkFreshLevelMVar
+      let instType :=  mkApp (mkConst ``SampleableExt [u, v]) αExp
+      let samp ← synthInstance instType
+      let xInterp ← mkAppOptM ``SampleableExt.interp #[αExp, samp, xExpr]
+      let e' ← mkAppM' βExp #[xInterp]
+      let (e', _) ← dsimp e' {}
+      pure (some e')
     if cfg.traceSuccesses || cfg.traceDiscarded then
       slimTrace s!"{var} := {repr x}"
-    let r ← runPropExpr (β <| SampleableExt.interp x) cfg false e'
+    let r ← runPropExpr (β <| SampleableExt.interp x) cfg false e'?
     let ⟨finalX, finalR⟩ ←
       if isFailure r then
         if cfg.traceSuccesses then
@@ -559,39 +559,22 @@ instance varTestable [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x
           pure ⟨x, r⟩
       else
         pure ⟨x, r⟩
-    let xExpr := toExpr finalX
-    let .sort u ← inferType αExp | throwError m!"Expected a sort, got {αExp}"
-    let v ←  mkFreshLevelMVar
-    let instType :=  mkApp (mkConst ``SampleableExt [u, v]) αExp
-    let samp ← synthInstance instType
-    let xInterp ← mkAppOptM ``SampleableExt.interp #[αExp, samp, xExpr]
+    let hExpr? ← match getProxyExpr? α with
+    | none => pure none
+    | some inst =>
+      let xExpr := toExpr finalX
+      let .sort u ← inferType αExp | throwError m!"Expected a sort, got {αExp}"
+      let v ←  mkFreshLevelMVar
+      let instType :=  mkApp (mkConst ``SampleableExt [u, v]) αExp
+      let samp ← synthInstance instType
+      let xInterp ← mkAppOptM ``SampleableExt.interp #[αExp, samp, xExpr]
+      let hExpr ← withLocalDeclD `x e fun x => do
+        mkLambdaFVars #[x] (mkApp x xInterp)
+      pure (some hExpr)
     let h := (· <| SampleableExt.interp finalX)
-    let hExpr ← withLocalDeclD `x e fun x => do
-      mkLambdaFVars #[x] (mkApp x xInterp)
-    addVarInfo var finalX h hExpr finalR
+    addVarInfo var finalX h hExpr? finalR
 
 
--- Typeclass inference does not seem to work across `mkSelfContained`, so we need to provide instances for the basic types
-instance : ProxyExpr Bool := (inferInstance : ToExpr Bool)
-instance : ProxyExpr String := (inferInstance : ToExpr String)
-instance : ProxyExpr Nat := (inferInstance : ToExpr Nat)
-instance : ProxyExpr Int := (inferInstance : ToExpr Int)
-instance : ProxyExpr Char := (inferInstance : ToExpr Char)
-instance : ProxyExpr Unit := (inferInstance : ToExpr Unit)
-instance : ProxyExpr USize := (inferInstance : ToExpr USize)
-instance : ProxyExpr UInt32 := (inferInstance : ToExpr UInt32)
-instance : ProxyExpr UInt64 := (inferInstance : ToExpr UInt64)
-instance : ProxyExpr UInt16 := (inferInstance : ToExpr UInt16)
-instance {n : Nat} : ProxyExpr (Fin n.succ) := (inferInstance : ToExpr (Fin n.succ))
-
-instance : ProxyExpr Prop := (inferInstance : ToExpr Bool)
-
-instance  [SampleableExt α][ProxyExpr α] : ProxyExpr (List α) :=
-  (inferInstance : ToExpr (List (SampleableExt.proxy α)))
-instance  [SampleableExt α][ProxyExpr α] : ProxyExpr (Array α) :=
-  (inferInstance : ToExpr (Array (SampleableExt.proxy α)))
-instance  [SampleableExt α][SampleableExt β] [ProxyExpr α][ProxyExpr β] : ProxyExpr (Prod α β) :=
-  (inferInstance : ToExpr (Prod (SampleableExt.proxy α) (SampleableExt.proxy β) ))
 
 
 theorem bool_to_prop_fmly (β : Prop → Prop): NamedBinder var (∀ (p : Prop), β p) → ∀ (b : Bool), β (b = true) := fun h b => h (b = true)
@@ -640,7 +623,7 @@ theorem prop_iff_subtype (p : α → Prop) (β : α → Prop) : NamedBinder var 
 instance (priority := 2000) subtypeVarTestable {p : α → Prop} {β : α → Prop}
     [∀ x, PrintableProp (p x)]
     [∀ x, MetaTestable (β x)][ToExpr α]
-    [SampleableExt (Subtype p)] [ProxyExpr (Subtype p)] {var'} :
+    [SampleableExt (Subtype p)]  {var'} :
     MetaTestable (NamedBinder var <| (x : α) → NamedBinder var' <| p x → β x) where
   runExpr cfg min e? :=
   match e? with
@@ -651,7 +634,7 @@ instance (priority := 2000) subtypeVarTestable {p : α → Prop} {β : α → Pr
           let idExp ← mkAppOptM ``id #[e]
           addInfo s!"guard: {printProp (p x)} (by construction)" id idExp r (PSum.inr id) }
     do
-      let r ← @runExpr (∀ x : Subtype p, β x.val) (@varTestable var _ _ _ _ _) cfg min none
+      let r ← @runExpr (∀ x : Subtype p, β x.val) (@varTestable var  _ _ _ _) cfg min none
       iff (prop_iff_subtype p β) none r
   | some e => do
     let (some pExp, some βExp, some _) ← forallPropProp? e | throwError m!"Expected a `Forall` proposition with arrow, got {← ppExpr e}"
@@ -668,7 +651,7 @@ instance (priority := 2000) subtypeVarTestable {p : α → Prop} {β : α → Pr
         let x' ← mkAppM ``Subtype.val #[x]
         let y ← mkAppM' βExp #[x']
         mkForallFVars #[x] y
-      let r ← @runExpr (∀ x : Subtype p, β x.val) (@varTestable var _ _ _ _ _) cfg min e'
+      let r ← @runExpr (∀ x : Subtype p, β x.val) (@varTestable var  _ _ _ _) cfg min e'
       let hExp ← mkAppM ``prop_iff_subtype #[pExp, βExp]
       iff (prop_iff_subtype p β) hExp r
 
