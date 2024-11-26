@@ -700,7 +700,7 @@ def giveUp (x : Nat) : MetaTestResult p → MetaTestResult p
 end MetaTestable
 
 /-- Try `n` times to find a counter-example for `p`. -/
-def MetaTestable.runSuiteAux (p : Prop) [MetaTestable p] (propExpr: Expr) (cfg : Configuration) :
+def MetaTestable.runSuiteAux (p : Prop) [MetaTestable p] (propExpr: Option Expr) (cfg : Configuration) :
     MetaTestResult p → Nat → MRand (MetaTestResult p)
   | r, 0 => return r
   | r, n+1 => do
@@ -715,11 +715,11 @@ def MetaTestable.runSuiteAux (p : Prop) [MetaTestable p] (propExpr: Expr) (cfg :
     | _ => return x
 
 /-- Try to find a counter-example of `p`. -/
-def MetaTestable.runSuite (p : Prop) [MetaTestable p] (propExpr: Expr) (cfg : Configuration := {}) : MRand (MetaTestResult p) :=
+def MetaTestable.runSuite (p : Prop) [MetaTestable p] (propExpr: Option Expr) (cfg : Configuration := {}) : MRand (MetaTestResult p) :=
   MetaTestable.runSuiteAux p propExpr cfg (success <| PSum.inl ()) cfg.numInst
 
 /-- Run a test suite for `p` in `MetaM` using the global RNG in `stdGenRef`. -/
-def MetaTestable.checkM (p : Prop) [MetaTestable p]  (cfg : Configuration := {}) (propExpr: Expr) : MetaM (MetaTestResult p) :=
+def MetaTestable.seekM (p : Prop) [MetaTestable p]  (cfg : Configuration := {}) (propExpr: Option Expr) : MetaM (MetaTestResult p) :=
   match cfg.randomSeed with
   | none => runRand (MetaTestable.runSuite p propExpr cfg)
   | some seed => runRandWith seed (MetaTestable.runSuite p propExpr cfg)
@@ -728,9 +728,9 @@ end Meta
 
 open Decorations in
 /-- Run a test suite for `p` and throw an exception if `p` does not hold. -/
-def MetaTestable.check (p : Prop) (cfg : Configuration := {})
+def MetaTestable.seek (p : Prop) (cfg : Configuration := {})
     (p' : Decorations.DecorationsOf p := by mk_decorations) [MetaTestable p'](propExpr: Expr) : Lean.MetaM (Option Expr) := do
-  match ← MetaTestable.checkM p' cfg propExpr with
+  match ← MetaTestable.seekM p' cfg propExpr with
   | MetaTestResult.success _ =>
     if !cfg.quiet then Lean.logInfo "Unable to find a counter-example"
     return none
@@ -753,7 +753,7 @@ def disproveM? (cfg : Configuration) (tgt: Expr) : MetaM <| Option Expr := do
     synthInstance (← mkAppM ``MetaTestable #[tgt'])
   catch _ =>
     throwError "Failed to create a `testable` instance for `{tgt}`."
-  let e ← mkAppOptM ``MetaTestable.check #[tgt, toExpr cfg, tgt', inst]
+  let e ← mkAppOptM ``MetaTestable.seek #[tgt, toExpr cfg, tgt', inst]
   let expectedType := Lean.Expr.forallE `a
     (Lean.Expr.const `Lean.Expr [])
     (Lean.Expr.app
@@ -765,7 +765,24 @@ def disproveM? (cfg : Configuration) (tgt: Expr) : MetaM <| Option Expr := do
   let code ← unsafe evalExpr (Expr → MetaM (Option Expr)) expectedType e
   code tgt
 
--- Negate
+open Decorations in
+/-- Run a test suite for `p` and throw an exception if `p` does not hold. -/
+def MetaTestable.check (p : Prop) (cfg : Configuration := {})
+    (p' : Decorations.DecorationsOf p := by mk_decorations) [MetaTestable p'](propExpr: Option Expr := none) : Lean.MetaM Unit := do
+  match ← MetaTestable.seekM p' cfg propExpr with
+  | MetaTestResult.success _ =>
+    if !cfg.quiet then Lean.logInfo "Unable to find a counter-example"
+  | MetaTestResult.gaveUp n =>
+    if !cfg.quiet then
+      let msg := s!"Gave up after failing to generate values that fulfill the preconditions {n} times."
+      Lean.logWarning msg
+  | MetaTestResult.failure _ _ xs n =>
+    let msg := "Found a counter-example!"
+    if cfg.quiet then
+      throwError msg
+    else
+      throwError  Testable.formatFailure msg xs n
+
 
 
 end Plausible

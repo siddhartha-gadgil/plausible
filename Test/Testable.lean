@@ -4,6 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Henrik Böving
 -/
 import Plausible.Testable
+import Plausible.MetaTestable
 
 open Plausible
 
@@ -25,3 +26,5 @@ instance : SampleableExt MyType :=
     return ⟨x, x + xyDiff, by omega⟩
 
 #eval Testable.check <| ∀ a b : MyType, a.y ≤ b.x → a.x ≤ b.y
+
+#eval MetaTestable.check <| ∀ a b : MyType, a.y ≤ b.x → a.x ≤ b.y

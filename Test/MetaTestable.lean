@@ -149,12 +149,12 @@ example : MetaTestable (NamedBinder "a" (∀ (a : Nat), a ≤ 1)) := inferInstan
 example : MetaTestable (NamedBinder "a" (∀ (a : Nat), NamedBinder "b" (∀ (b : Nat), a ≤ b))) := inferInstance
 
 -- Main tests: finding counterexamples
-#eval MetaTestable.check (∀ (_a : Nat), False) (propExpr := Lean.Expr.forallE `a (Lean.Expr.const `Nat []) (Lean.Expr.const `False []) (Lean.BinderInfo.default))
+#eval MetaTestable.seek (∀ (_a : Nat), False) (propExpr := Lean.Expr.forallE `a (Lean.Expr.const `Nat []) (Lean.Expr.const `False []) (Lean.BinderInfo.default))
 
 
-#eval MetaTestable.check (∀ (a : Nat), a < 1) (propExpr := Lean.Expr.forallE `a (Lean.Expr.const `Nat []) (Lean.Expr.const `False []) (Lean.BinderInfo.default))
+#eval MetaTestable.seek (∀ (a : Nat), a < 1) (propExpr := Lean.Expr.forallE `a (Lean.Expr.const `Nat []) (Lean.Expr.const `False []) (Lean.BinderInfo.default))
 
-#eval MetaTestable.check (∀ (a b : Nat), a < b) (propExpr := (Lean.Expr.forallE
+#eval MetaTestable.seek (∀ (a b : Nat), a < b) (propExpr := (Lean.Expr.forallE
   `a
   (Lean.Expr.const `Nat [])
   (Lean.Expr.forallE
@@ -172,7 +172,7 @@ example : MetaTestable (NamedBinder "a" (∀ (a : Nat), NamedBinder "b" (∀ (b 
     (Lean.BinderInfo.default))
   (Lean.BinderInfo.default)))
 
-#eval MetaTestable.check (∀ (a _b : Nat), a < 0) (propExpr := (Lean.Expr.forallE
+#eval MetaTestable.seek (∀ (a _b : Nat), a < 0) (propExpr := (Lean.Expr.forallE
   `a
   (Lean.Expr.const `Nat [])
   (Lean.Expr.forallE
