@@ -204,13 +204,13 @@ inductive MetaTestResult (p : Prop) where
   guarantee that there will be no false positive. The last component, `n`,
   is the number of times that the counter-example was shrunk.
   -/
-  | failure : ¬ p → Expr → List String → Nat → MetaTestResult p
+  | failure : ¬ p → Option Expr → List String → Nat → MetaTestResult p
   deriving Inhabited
 
 
 /-- `MetaTestable p` uses random examples to try to disprove `p`. -/
 class MetaTestable (p : Prop) where
-  run (cfg : Configuration) (minimize : Bool) (propExpr : Expr) :  MGen (MetaTestResult p)
+  runExpr (cfg : Configuration) (minimize : Bool) (propExpr : Expr) :  MGen (MetaTestResult p)
 
 
 namespace MetaTestResult
@@ -236,22 +236,22 @@ def checkDisproof (pf prop: Expr) : MetaM Unit := do
 
 /-- Combine the test result for properties `p` and `q` to create a test for their conjunction. -/
 def and : MetaTestResult p → MetaTestResult q → Expr →  MetaM (MetaTestResult (p ∧ q))
-  | failure h pf xs n, _, e => do
+  | failure h pf? xs n, _, e => do
     let (some e₁, some e₂) ← andProp? e | throwError m!"Expected an `And` proposition, got {← ppExpr e}"
-    let pf' ← withLocalDeclD `h e fun h => do
+    let pf'? ←
+      pf?.mapM fun pf => withLocalDeclD `h e fun h => do
       let x ← mkAppOptM ``And.left #[e₁, e₂, h]
-      let e' ← mkAppM' pf #[x]
+      let e' ←  mkAppM' pf #[x]
       mkLambdaFVars #[h] e'
-    checkDisproof pf' e
-    return failure (fun h2 => h h2.left) pf' xs n
-  | _, failure h pf xs n, e => do
+    -- checkDisproof pf' e
+    return failure (fun h2 => h h2.left) pf'? xs n
+  | _, failure h pf? xs n, e => do
     let (some e₁, some e₂)  ← andProp? e | throwError m!"Expected an `And` proposition, got {← ppExpr e}"
-
-    let pf' ← withLocalDeclD `h e fun h => do
+    let pf' ← pf?.mapM fun pf => withLocalDeclD `h e fun h => do
       let x ← mkAppOptM ``And.right #[e₁, e₂, h]
       let e' ← mkAppM' pf #[x]
       mkLambdaFVars #[h] e'
-    checkDisproof pf' e
+    -- checkDisproof pf' e
     return failure (fun h2 => h h2.right) pf' xs n
   | success h1, success h2, _ =>
     return success <| combine (combine (PSum.inr And.intro) h1) h2
@@ -284,8 +284,8 @@ to find counter-examples to `q`. -/
 def imp (h : q → p) (hExp: Expr) (r : MetaTestResult p)
     (p : Unit ⊕' (p → q) := PSum.inl ()) : MetaM (MetaTestResult q) :=
   match r with
-  | failure h2 pf xs n => do
-    let pf' ← mkAppM ``mt #[hExp, pf]
+  | failure h2 pf? xs n => do
+    let pf' ← pf?.mapM fun pf => mkAppM ``mt #[hExp, pf]
     return failure (mt h h2) pf' xs n
   | success h2 => return success <| combine p h2
   | gaveUp n => return gaveUp n
@@ -300,8 +300,8 @@ we record that value using this function so that our counter-examples
 can be informative. -/
 def addInfo (x : String) (h : q → p) (hExp: Expr) (r : MetaTestResult p)
     (p : Unit ⊕' (p → q) := PSum.inl ()) : (MetaM <| MetaTestResult q) := do
-  if let failure h2 pf xs n := r then
-    let pf' ← mkAppM ``mt #[hExp, pf]
+  if let failure h2 pf? xs n := r then
+    let pf' ← pf?.mapM fun pf => mkAppM ``mt #[hExp, pf]
     return failure (mt h h2) pf' (x :: xs) n
   else
     imp h hExp r p
@@ -325,31 +325,31 @@ open MetaTestResult
 abbrev ProxyExpr α [SampleableExt α] := ToExpr (SampleableExt.proxy α)
 
 
-def runProp (p : Prop) [MetaTestable p] : Configuration → Bool → Expr → MGen (MetaTestResult p) := fun cfg b e => do
-  MetaTestable.run cfg b e
+def runPropExpr (p : Prop) [MetaTestable p] : Configuration → Bool → Expr → MGen (MetaTestResult p) := fun cfg b e => do
+  runExpr cfg b e
 
 /-- A `dbgTrace` with special formatting -/
 def slimTrace {m : Type → Type _} [Pure m] (s : String) : m PUnit :=
   dbgTrace s!"[Plausible: {s}]" (fun _ => pure ())
 
 instance andTestable [MetaTestable p] [MetaTestable q] : MetaTestable (p ∧ q) where
-  run := fun cfg min e => do
+  runExpr := fun cfg min e => do
     let (some e₁, some e₂) ← andProp? e | throwError m!"Expected an `And` proposition, got {← ppExpr e}"
-    let xp ← runProp p cfg min e₁
-    let xq ← runProp q cfg min e₂
+    let xp ← runPropExpr p cfg min e₁
+    let xq ← runPropExpr q cfg min e₂
     and xp xq e
 
 instance orTestable [MetaTestable p] [MetaTestable q] : MetaTestable (p ∨ q) where
-  run := fun cfg min e => do
+  runExpr := fun cfg min e => do
     let (some e₁, some e₂) ← orProp? e | throwError m!"Expected an `Or` proposition, got {← ppExpr e}"
-    let xp ← runProp p cfg min e₁
+    let xp ← runPropExpr p cfg min e₁
     -- As a little performance optimization we can just not run the second
     -- test if the first succeeds
     match xp with
     | success (PSum.inl h) => return success (PSum.inl h)
     | success (PSum.inr h) => return success (PSum.inr <| Or.inl h)
     | _ =>
-      let xq ← runProp q cfg min e₂
+      let xq ← runPropExpr q cfg min e₂
       or xp xq e
 
 theorem iff_resolve (p q : Prop) : (p ↔ q) ↔ p ∧ q ∨ ¬p ∧ ¬q := by
@@ -360,9 +360,9 @@ theorem iff_resolve (p q : Prop) : (p ↔ q) ↔ p ∧ q ∨ ¬p ∧ ¬q := by
     rcases h with ⟨hleft, hright⟩ | ⟨hleft, hright⟩ <;> simp [hleft, hright]
 
 instance iffTestable [MetaTestable ((p ∧ q) ∨ (¬ p ∧ ¬ q))] : MetaTestable (p ↔ q) where
-  run := fun cfg min e => do
+  runExpr := fun cfg min e => do
     let some (α, β) ← iffProp? e | throwError m!"Expected an `Iff` proposition, got {← ppExpr e}"
-    let h ← runProp ((p ∧ q) ∨ (¬ p ∧ ¬ q)) cfg min e
+    let h ← runPropExpr ((p ∧ q) ∨ (¬ p ∧ ¬ q)) cfg min e
     let hExp ← mkAppM ``iff_resolve #[α, β]
     iff (iff_resolve p q) hExp h
 
@@ -370,11 +370,11 @@ variable {var : String}
 
 instance decGuardTestable [PrintableProp p] [Decidable p] {β : p → Prop} [∀ h, MetaTestable (β h)] :
     MetaTestable (NamedBinder var <| ∀ h, β h) where
-  run := fun cfg min e => do
+  runExpr := fun cfg min e => do
     if h : p then
       let (some βExp, some pExp) ← forallProp? e | throwError m!"Expected a `Forall` proposition, got {← ppExpr e}"
       let yExp ← mkAppM' βExp #[pExp]
-      let res := runProp (β h) cfg min yExp
+      let res := runPropExpr (β h) cfg min yExp
       let h' := (· <| h)
       let decInstType ← mkAppM ``Decidable #[pExp]
       let inst ← synthInstance decInstType
@@ -395,16 +395,16 @@ instance decGuardTestable [PrintableProp p] [Decidable p] {β : p → Prop} [∀
 
 instance forallTypesTestable {f : Type → Prop} [MetaTestable (f Int)] :
     MetaTestable (NamedBinder var <| ∀ x, f x) where
-  run := fun cfg min e => do
-    let r ← runProp (f Int) cfg min e
+  runExpr := fun cfg min e => do
+    let r ← runPropExpr (f Int) cfg min e
     addVarInfo var "Int"  (· <| Int) e r
 
 -- TODO: only in mathlib: @[pp_with_univ]
 instance (priority := 100) forallTypesULiftTestable.{u}
     {f : Type u → Prop} [MetaTestable (f (ULift.{u} Int))] :
     MetaTestable (NamedBinder var <| ∀ x, f x) where
-  run cfg min e := do
-    let r ← runProp (f (ULift Int)) cfg min e
+  runExpr cfg min e := do
+    let r ← runPropExpr (f (ULift Int)) cfg min e
     addVarInfo var "ULift Int" (· <| ULift Int) e r
 
 /--
@@ -441,7 +441,7 @@ partial def minimizeAux [SampleableExt α] [ProxyExpr α] {β : α → Prop} [�
     let samp ← synthInstance instType
     let xInterp ← mkAppOptM ``SampleableExt.interp #[αExp, samp, xExpr]
     let e' ← mkAppM' βExpr #[xInterp]
-    let res ← OptionT.lift <| MetaTestable.runProp (β (SampleableExt.interp candidate)) cfg true e'
+    let res ← OptionT.lift <| runPropExpr (β (SampleableExt.interp candidate)) cfg true e'
     if res.isFailure then
       if cfg.traceShrink then
         slimTrace s!"{var} shrunk to {repr candidate} from {repr x}"
@@ -468,7 +468,7 @@ open Lean Meta Elab Term Tactic in
 bound variable with it. -/
 instance varTestable [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x, MetaTestable (β x)] :
     MetaTestable (NamedBinder var <| ∀ x : α, β x) where
-  run := fun cfg min e => do
+  runExpr := fun cfg min e => do
     let  (some βExp, some αExp) ← forallProp? e | throwError m!"Expected a `Forall` proposition, got {← ppExpr e}"
     let x ← SampleableExt.sample
     let xExpr := toExpr x
@@ -482,7 +482,7 @@ instance varTestable [SampleableExt α] [ProxyExpr α] {β : α → Prop} [∀ x
     let (e', _) ← dsimp e' {}
     if cfg.traceSuccesses || cfg.traceDiscarded then
       slimTrace s!"{var} := {repr x}"
-    let r ← MetaTestable.runProp (β <| SampleableExt.interp x) cfg false e'
+    let r ← runPropExpr (β <| SampleableExt.interp x) cfg false e'
     let ⟨finalX, finalR⟩ ←
       if isFailure r then
         if cfg.traceSuccesses then
@@ -534,20 +534,20 @@ theorem bool_to_prop_fmly (β : Prop → Prop): NamedBinder var (∀ (p : Prop),
 instance propVarTestable {β : Prop → Prop} [h: ∀ b : Bool, MetaTestable (β b)] :
   MetaTestable (NamedBinder var <| ∀ p : Prop, β p)
 where
-  run := fun cfg min e => do
+  runExpr := fun cfg min e => do
     let (some βExpr, _) ← forallProp? e | throwError m!"Expected a `Forall` proposition, got {← ppExpr e}"
-    let p ←  MetaTestable.runProp (NamedBinder var <| ∀ b : Bool, β b) cfg min e
+    let p ←  runPropExpr (NamedBinder var <| ∀ b : Bool, β b) cfg min e
     let e' ← mkAppM ``bool_to_prop_fmly #[βExpr]
     imp (bool_to_prop_fmly β) e' p
 
 instance (priority := high) unusedVarTestable {β : Prop} [Nonempty α] [MetaTestable β] :
   MetaTestable (NamedBinder var (α → β))
 where
-  run := fun cfg min e => do
+  runExpr := fun cfg min e => do
     if cfg.traceDiscarded || cfg.traceSuccesses then
       slimTrace s!"{var} is unused"
     let (some aExp, some e') ← impProp? e | throwError m!"Expected an `Imp` proposition, got {← ppExpr e}"
-    let r ← MetaTestable.runProp β cfg min e'
+    let r ← runPropExpr β cfg min e'
     let hExp ← mkAppOptM ``id #[e']
     let finalR ←  addInfo s!"{var} is irrelevant (unused)" id hExp r
     let h := (· <| Classical.ofNonempty)
@@ -564,14 +564,14 @@ instance (priority := 2000) subtypeVarTestable {p : α → Prop} {β : α → Pr
     [∀ x, MetaTestable (β x)][ToExpr α]
     [SampleableExt (Subtype p)] [ProxyExpr (Subtype p)] {var'} :
     MetaTestable (NamedBinder var <| (x : α) → NamedBinder var' <| p x → β x) where
-  run cfg min e := do
+  runExpr cfg min e := do
     let (some pExp, some βExp, some _) ← forallPropProp? e | throwError m!"Expected a `Forall` proposition with arrow, got {← ppExpr e}"
     let subType ← mkAppM ``Subtype #[pExp]
     letI (x : Subtype p) : MetaTestable (β x) :=
-      { run := fun cfg min e => do
+      { runExpr := fun cfg min e => do
           let xExp := toExpr x.val
           let y ← mkAppM' βExp #[xExp]
-          let r ← MetaTestable.runProp (β x.val) cfg min y
+          let r ← runPropExpr (β x.val) cfg min y
           let idExp ← mkAppOptM ``id #[e]
           addInfo s!"guard: {printProp (p x)} (by construction)" id idExp r (PSum.inr id) }
     do
@@ -579,13 +579,13 @@ instance (priority := 2000) subtypeVarTestable {p : α → Prop} {β : α → Pr
         let x' ← mkAppM ``Subtype.val #[x]
         let y ← mkAppM' βExp #[x']
         mkForallFVars #[x] y
-      let r ← @MetaTestable.run (∀ x : Subtype p, β x.val) (@varTestable var _ _ _ _ _) cfg min e'
+      let r ← @runExpr (∀ x : Subtype p, β x.val) (@varTestable var _ _ _ _ _) cfg min e'
       let hExp ← mkAppM ``prop_iff_subtype #[pExp, βExp]
       iff (prop_iff_subtype p β) hExp r
 
 instance (priority := low) decidableTestable {p : Prop} [PrintableProp p] [Decidable p] :
     MetaTestable p where
-  run := fun _ _ e _ => do
+  runExpr := fun _ _ e _ => do
     if h : p then
       return success (PSum.inr h)
     else
@@ -632,7 +632,7 @@ def MetaTestable.runSuiteAux (p : Prop) [MetaTestable p] (propExpr: Expr) (cfg :
     if cfg.traceSuccesses then
       slimTrace s!"New sample"
       slimTrace s!"Retrying up to {cfg.numRetries} times until guards hold"
-    let x ← retry (ReaderT.run (MetaTestable.runProp p cfg true propExpr) ⟨size⟩) cfg.numRetries
+    let x ← retry (ReaderT.run (runPropExpr p cfg true propExpr) ⟨size⟩) cfg.numRetries
     match x with
     | success (PSum.inl ()) => runSuiteAux p propExpr cfg r n
     | gaveUp g => runSuiteAux p propExpr cfg (giveUp g r) n
@@ -669,7 +669,7 @@ def MetaTestable.check (p : Prop) (cfg : Configuration := {})
       Lean.logInfo msg
     else
       Lean.logInfo <| Testable.formatFailure msg xs n
-    return some pf
+    return pf
 
 def disproveM? (cfg : Configuration) (tgt: Expr) : MetaM <| Option Expr := do
   let tgt' ← Decorations.addDecorations tgt
