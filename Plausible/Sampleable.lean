@@ -377,11 +377,14 @@ instance Prod.sampleableExt {α : Type u} {β : Type v} [SampleableExt α] [Samp
   shrink := inferInstance
   sample := prodOf sample sample
   interp := Prod.map interp interp
-  proxyExpr? := do
-    let inst₁ ←  getProxyExpr? α
-    let inst₂ ←  getProxyExpr? β
-    pure <| @instToExprProd _ _ inst₁ inst₂
+  proxyExpr? := none -- an expression causes a problem with Function
+  -- do
+  --   let inst₁ ←  getProxyExpr? α
+  --   let inst₂ ←  getProxyExpr? β
+  --   pure <| @instToExprProd _ _ inst₁ inst₂
 
+set_option pp.universes true
+#check instToExprProd
 
 instance Prop.sampleableExt : SampleableExt Prop where
   proxy := Bool

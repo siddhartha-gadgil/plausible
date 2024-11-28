@@ -126,19 +126,17 @@ where
 
 variable [Repr α]
 
--- instance Pi.sampleableExt : SampleableExt (α → β) where
---   proxy := TotalFunction α (SampleableExt.proxy β)
---   interp f := SampleableExt.interp ∘ f.apply
---   sample := do
---     let xs : List (_ × _) ← (SampleableExt.sample (α := List (α × β)))
---     let ys := (SampleableExt.sample : Gen (SampleableExt.proxy β))
---     let ys' := Gen.up ys
---     let ⟨x⟩ ← ys'
---     pure <| TotalFunction.withDefault (List.toFinmap' <| xs.map <|
---       Prod.map SampleableExt.interp id) x
---   -- note: no way of shrinking the domain without an inverse to `interp`
---   shrink := { shrink := letI : Shrinkable α := {}; TotalFunction.shrink }
---   proxyExpr? := none
+instance Pi.sampleableExt : SampleableExt (α → β) where
+  proxy := TotalFunction α (SampleableExt.proxy β)
+  interp f := SampleableExt.interp ∘ f.apply
+  sample := do
+    let xs : List (_ × _) ← (SampleableExt.sample (α := List (α × β)))
+    let ⟨x⟩ ← Gen.up (SampleableExt.sample : Gen (SampleableExt.proxy β))
+    pure <| TotalFunction.withDefault (List.toFinmap' <| xs.map <|
+      Prod.map SampleableExt.interp id) x
+  -- note: no way of shrinking the domain without an inverse to `interp`
+  shrink := { shrink := letI : Shrinkable α := {}; TotalFunction.shrink }
+  proxyExpr? := none
 
 end
 
