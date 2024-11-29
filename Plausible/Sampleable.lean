@@ -370,18 +370,17 @@ instance Option.sampleableExt [SampleableExt α] : SampleableExt (Option α) whe
   interp o := o.map interp
   proxyExpr? := getProxyExpr? α |>.map fun p => (@instToExprOption _ p)
 
-instance Prod.sampleableExt {α : Type u} {β : Type v} [SampleableExt α] [SampleableExt β] :
+instance Prod.sampleableExt {α : Type u} {β : Type v} [inst₁ : SampleableExt α] [inst₂ : SampleableExt β] :
     SampleableExt (α × β) where
   proxy := Prod (proxy α) (proxy β)
   proxyRepr := inferInstance
   shrink := inferInstance
   sample := prodOf sample sample
   interp := Prod.map interp interp
-  proxyExpr? := none -- an expression causes a problem with Function
-  -- do
-  --   let inst₁ ←  getProxyExpr? α
-  --   let inst₂ ←  getProxyExpr? β
-  --   pure <| @instToExprProd _ _ inst₁ inst₂
+  proxyExpr? :=
+    match inst₁.proxyExpr?, inst₂.proxyExpr? with
+    | some p₁, some p₂ => some <| @instToExprProd _ _ p₁ p₂
+    | _ , _ => none
 
 set_option pp.universes true
 #check instToExprProd
