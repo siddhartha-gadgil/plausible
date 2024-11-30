@@ -27,4 +27,5 @@ instance : SampleableExt MyType :=
 
 #eval Testable.check <| ∀ a b : MyType, a.y ≤ b.x → a.x ≤ b.y
 
+set_option trace.profiler true in
 #eval MetaTestable.check <| ∀ a b : MyType, a.y ≤ b.x → a.x ≤ b.y

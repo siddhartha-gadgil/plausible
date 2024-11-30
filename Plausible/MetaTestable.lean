@@ -399,7 +399,8 @@ instance decGuardTestable [PrintableProp p] [Decidable p] {β : p → Prop} [∀
     | none =>
       let res := runPropExpr (β h) cfg min none
       let s := printProp p
-      ← (fun r => addInfo s!"guard: {s}" (· <| h) none r (PSum.inr <| fun q _ => q)) <$> res    | some e =>
+      ← (fun r => addInfo s!"guard: {s}" (· <| h) none r (PSum.inr <| fun q _ => q)) <$> res
+    | some e =>
       let (some βExp, some pExp) ← forallProp? e | throwError m!"Expected a `Forall` proposition, got {← ppExpr e}"
       let h' := (· <| h)
       let yExp ←
