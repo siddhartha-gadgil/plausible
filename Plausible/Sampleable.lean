@@ -106,11 +106,15 @@ If we test a quantification over functions the
 counter-examples cannot be shrunken or printed meaningfully.
 For that purpose, `SampleableExt` provides a proxy representation
 `proxy` that can be printed and shrunken as well
-as interpreted (using `interp`) as an object of the right type. -/
+as interpreted (using `interp`) as an object of the right type.
+
+SampleableExt can also be used to constuct expressions representing disproofs in some cases. For this,  the `proxy` type should be a type that can be represented as an expression and the field `proxyExpr?` should be set to such a function. Expressions for disproofs will not be generated for sampling involving instances where `proxyExpr?` is `none`.
+-/
 class SampleableExt (α : Sort u) where
   proxy : Type v
   [proxyRepr : Repr proxy]
   [shrink : Shrinkable proxy]
+  /-- Expressions representing terms of type proxy if available.-/
   proxyExpr? : Option (ToExpr proxy)
   sample : Gen proxy
   interp : proxy → α
@@ -257,6 +261,8 @@ instance Subtype.shrinkable {α : Type u} {β : α → Prop} [Shrinkable α] [�
 end Shrinkers
 
 section Samplers
+
+variable {α : Type u} {β : Type v}
 
 open SampleableExt
 
