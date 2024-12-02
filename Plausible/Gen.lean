@@ -91,7 +91,7 @@ def listOf (x : Gen α) : Gen (List α) := do
 /-- Given a list of example generators, choose one to create an example. -/
 def oneOf (xs : Array (Gen α)) (pos : 0 < xs.size := by decide) : Gen α := do
   let ⟨x, _, h2⟩ ← up <| chooseNatLt 0 xs.size pos
-  xs.get ⟨x, h2⟩
+  xs[x]
 
 /-- Given a list of examples, choose one to create an example. -/
 def elements (xs : List α) (pos : 0 < xs.length) : Gen α := do
