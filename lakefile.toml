@@ -12,4 +12,4 @@ name = "Plausible"
 [[require]]
 name = "batteries"
 scope = "leanprover-community"
-rev = "v4.15.0"
+rev = "v4.16.0-rc1"
