@@ -367,6 +367,12 @@ def Char.sampleable (length : Nat) (chars : List Char) (pos : 0 < chars.length) 
 instance Char.sampleableDefault : SampleableExt Char :=
   Char.sampleable 3 " 0123abcABC:,;`\\/".toList (by decide)
 
+def optionExpr {α : Type u} [ToExpr α] : ToExpr (Option α) :=
+  { toExpr := fun
+    | none => mkConst ``Option.none
+    | some a => mkApp (mkConst ``Option.some) (toExpr a),
+    toTypeExpr := mkApp (mkConst ``Option [levelZero]) (toTypeExpr α) }
+
 instance Option.sampleableExt [SampleableExt α] : SampleableExt (Option α) where
   proxy := Option (proxy α)
   sample := do
@@ -374,7 +380,12 @@ instance Option.sampleableExt [SampleableExt α] : SampleableExt (Option α) whe
     | true => return none
     | false => return some (← sample)
   interp o := o.map interp
-  proxyExpr? := getProxyExpr? α |>.map fun p => (@instToExprOption _ p)
+  proxyExpr? := getProxyExpr? α |>.map fun p => @optionExpr _ p
+
+def prodExpr {α : Type u} {β : Type v} [ToExpr α] [ToExpr β] : ToExpr (α × β) :=
+  { toExpr := fun ⟨a, b⟩ =>
+    mkApp2 (mkConst ``Prod.mk [levelZero, levelZero]) (toExpr a) (toExpr b),
+    toTypeExpr := mkApp2 (mkConst ``Prod [levelZero, levelZero]) (toTypeExpr α) (toTypeExpr β) }
 
 instance Prod.sampleableExt {α : Type u} {β : Type v} [inst₁ : SampleableExt α] [inst₂ : SampleableExt β] :
     SampleableExt (α × β) where
@@ -385,11 +396,9 @@ instance Prod.sampleableExt {α : Type u} {β : Type v} [inst₁ : SampleableExt
   interp := Prod.map interp interp
   proxyExpr? :=
     match inst₁.proxyExpr?, inst₂.proxyExpr? with
-    | some p₁, some p₂ => some <| @instToExprProd _ _ p₁ p₂
+    | some p₁, some p₂ => some <| @prodExpr _ _ p₁ p₂
     | _ , _ => none
 
-set_option pp.universes true
-#check instToExprProd
 
 instance Prop.sampleableExt : SampleableExt Prop where
   proxy := Bool
@@ -399,11 +408,18 @@ instance Prop.sampleableExt : SampleableExt Prop where
   proxyExpr? := some inferInstance
   interp := Coe.coe
 
+def listExpr {α : Type u} [ToExpr α] : ToExpr (List α) :=
+  { toExpr := fun xs =>
+    let xs := xs.toArray
+    let exprs := xs.map (fun x => toExpr x)
+    exprs.foldr (fun e es => mkApp2 (mkConst ``List.cons) e es) (mkConst ``List.nil),
+    toTypeExpr := mkApp (mkConst ``List [levelZero]) (toTypeExpr α) }
+
 instance List.sampleableExt [SampleableExt α] : SampleableExt (List α) where
   proxy := List (proxy α)
   sample := Gen.listOf sample
   interp := List.map interp
-  proxyExpr? := getProxyExpr? α |>.map fun p => (@instToExprList _ p)
+  proxyExpr? := getProxyExpr? α |>.map fun p => (@listExpr _ p)
 
 instance ULift.sampleableExt [SampleableExt α] : SampleableExt (ULift α) where
   proxy := proxy α
@@ -415,11 +431,18 @@ instance ULift.sampleableExt [SampleableExt α] : SampleableExt (ULift α) where
 instance String.sampleableExt : SampleableExt String :=
   mkSelfContained do return String.mk (← Gen.listOf (Char.sampleableDefault.sample))
 
+def arrayExpr {α : Type u} [ToExpr α] : ToExpr (Array α) :=
+  { toExpr := fun xs =>
+    let xs := xs.toList
+    let lExpr := @toExpr _ (listExpr) xs
+    mkApp (mkConst ``List.toArray) lExpr,
+    toTypeExpr := mkApp (mkConst ``Array [levelZero]) (toTypeExpr α) }
+
 instance Array.sampleableExt [SampleableExt α] : SampleableExt (Array α) where
   proxy := Array (proxy α)
   sample := Gen.arrayOf sample
   interp := Array.map interp
-  proxyExpr? := getProxyExpr? α |>.map fun p => (@instToExprArray _ p)
+  proxyExpr? := getProxyExpr? α |>.map fun p => (@arrayExpr _ p)
 
 
 end Samplers
