@@ -537,7 +537,7 @@ instance varTestable [SampleableExt α] {β : α → Prop} [∀ x, MetaTestable 
       let samp ← synthInstance instType
       let xInterp ← mkAppOptM ``SampleableExt.interp #[αExp, samp, xExpr]
       let e' ← mkAppM' βExp #[xInterp]
-      let (e', _) ← dsimp e' {}
+      -- let (e', _) ← dsimp e' {}
       pure (some e')
     if cfg.traceSuccesses || cfg.traceDiscarded then
       slimTrace s!"{var} := {repr x}"

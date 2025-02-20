@@ -6,7 +6,8 @@ Authors: Henrik Böving, Simon Hudon
 import Lean.Meta
 import Lean.Elab.Command
 import Plausible.Gen
-open Lean
+import Qq
+open Lean Qq
 
 /-!
 # `SampleableExt` Class
@@ -263,13 +264,14 @@ end Shrinkers
 section Samplers
 
 variable {α : Type u} {β : Type v}
+#check Impl.unquoteExpr
 
 open SampleableExt
 
 instance instToExprSum [ToExpr α] [ToExpr β] : ToExpr (α ⊕ β) :=
-  let αType := toTypeExpr α
-  let βType := toTypeExpr β
-  { toExpr     := fun a =>
+  let αType : Q(Type) := toTypeExpr α
+  let βType : Q(Type ):= toTypeExpr β
+  { toExpr : α ⊕ β → Q($αType ⊕ $βType)   := fun a =>
     match a with
     | .inl a =>
       mkApp3 (mkConst ``Sum.inl [levelZero, levelZero]) αType βType (toExpr a)
