@@ -24,4 +24,6 @@ instance : SampleableExt MyType :=
     let xyDiff ← SampleableExt.interpSample Nat
     return ⟨x, x + xyDiff, by omega⟩
 
+/-- warning: Gave up after failing to generate values that fulfill the preconditions 13 times. -/
+#guard_msgs in
 #eval Testable.check <| ∀ a b : MyType, a.y ≤ b.x → a.x ≤ b.y
