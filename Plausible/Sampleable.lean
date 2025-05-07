@@ -5,6 +5,7 @@ Authors: Henrik Böving, Simon Hudon
 -/
 import Lean.Meta
 import Lean.Elab.Command
+import Lean.Meta.Eval
 import Plausible.Gen
 import Qq
 open Lean Qq
@@ -237,7 +238,7 @@ open Shrinkable
 instance List.shrinkable [Shrinkable α] : Shrinkable (List α) where
   shrink := fun L =>
     (L.mapIdx fun i _ => L.eraseIdx i) ++
-    (L.mapIdx fun i a => (shrink a).map fun a' => L.modify (fun _ => a') i).flatten
+    (L.mapIdx fun i a => (shrink a).map fun a' => L.modify i fun _ => a').flatten
 
 instance ULift.shrinkable [Shrinkable α] : Shrinkable (ULift α) where
   shrink u := (shrink u.down).map ULift.up
